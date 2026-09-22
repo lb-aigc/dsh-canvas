@@ -406,27 +406,44 @@ export function apply(ctx: Context): void {
     if (event.type !== 'assistant/message' && event.type !== 'tool/result') return
     const metas = generatedImagesOf(event)
     if (metas.length === 0) return
-    const before = foldCanvas(session.snapshotEvents())
-    let next = before
-    for (const meta of metas) {
-      if (next.nodes.some((node) => node.url === meta.attachmentId)) continue
-      const auto = next.nodes.length
-      const result = addNode(next, {
-        kind: 'image',
-        label: meta.name ?? '生成图片',
-        x: (auto % 4) * 220,
-        y: Math.floor(auto / 4) * 180,
-        url: meta.attachmentId,
-        meta: {
-          ...(meta.width === undefined ? {} : { width: meta.width }),
-          ...(meta.height === undefined ? {} : { height: meta.height }),
-          ...(meta.mediaType === undefined ? {} : { mediaType: meta.mediaType }),
-          ...(meta.bytes === undefined ? {} : { bytes: meta.bytes }),
-        },
-      })
-      next = result.state
-    }
-    if (next.nodes.length !== before.nodes.length) session.append('canvas/state', { state: next })
+    // Defer the canvas/state append out of the current session/event dispatch.
+    // This listener runs synchronously INSIDE the triggering event's
+    // Session.append (the tool/result / assistant/message append is still
+    // publishing — entry.appending is true), so appending canvas/state here
+    // would re-enter Session.append and throw "session append cannot reenter
+    // while another append is being published". That throw is swallowed by the
+    // observer containment (logger.warn, no banner), which is why the canvas
+    // silently stayed empty. A microtask runs after the triggering append's
+    // finally clears the flag, so the canvas write-back lands cleanly.
+    queueMicrotask(() => {
+      try {
+        const before = foldCanvas(session.snapshotEvents())
+        let next = before
+        for (const meta of metas) {
+          if (next.nodes.some((node) => node.url === meta.attachmentId)) continue
+          const auto = next.nodes.length
+          const result = addNode(next, {
+            kind: 'image',
+            label: meta.name ?? '生成图片',
+            x: (auto % 4) * 220,
+            y: Math.floor(auto / 4) * 180,
+            url: meta.attachmentId,
+            meta: {
+              ...(meta.width === undefined ? {} : { width: meta.width }),
+              ...(meta.height === undefined ? {} : { height: meta.height }),
+              ...(meta.mediaType === undefined ? {} : { mediaType: meta.mediaType }),
+              ...(meta.bytes === undefined ? {} : { bytes: meta.bytes }),
+            },
+          })
+          next = result.state
+        }
+        if (next.nodes.length !== before.nodes.length) session.append('canvas/state', { state: next })
+      } catch (error) {
+        // The session may have been disposed before the microtask ran; a failed
+        // mirror must never take the session down.
+        console.error('[ldd-canvas] auto-mirror failed:', error)
+      }
+    })
   })
 
   // The write-back Remote service. `new CanvasService(ctx)` registers `ctx.canvas`
