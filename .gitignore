@@ -1,6 +1,9 @@
 node_modules/
-lib/
 dist/
 *.tgz
 *.log
 .DS_Store
+# lib/ is pre-committed build output (the standalone repo has no monorepo build
+# yet, so the packed artifacts ship in git for the `dsh plugin add github:...`
+# fast path). Source maps stay local.
+lib/**/*.map
