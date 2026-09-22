@@ -393,14 +393,17 @@ export function apply(ctx: Context): void {
   const disposers = defineCanvasTools().map((tool) => ctx.tools.register(tool))
   ctx.effect(() => () => { for (const dispose of disposers) dispose() }, 'ldd-canvas: dispose tools')
 
-  // Auto-mirror generated images onto the canvas: whenever an agent turn settles
-  // an `assistant/message`, capture every image block it produced (generate_image
-  // renders its results as `image` blocks) and add each as a canvas image node —
-  // unless the canvas already carries that attachment. Media is normally produced
-  // by describing it in the agent input, so the canvas keeps an up-to-date board
-  // of generated assets without the agent having to call canvas_* tools by hand.
+  // Auto-mirror generated images onto the canvas: generate_image renders its
+  // results as `image` blocks INSIDE a `tool/result` event (the tool-result
+  // block nests the image attachment under `data.message.content`). The
+  // `assistant/message` that closes the turn only carries text/tool-call, so
+  // watching only assistant settlements missed every generated picture. Watch
+  // both `tool/result` (where generate_image lands) and `assistant/message`
+  // (in case an image is ever surfaced there directly), and add each image the
+  // canvas doesn't already carry as an image node (auto grid layout) with its
+  // full durable reference written into the node meta.
   ctx.on('session/event', (session, event) => {
-    if (event.type !== 'assistant/message') return
+    if (event.type !== 'assistant/message' && event.type !== 'tool/result') return
     const metas = generatedImagesOf(event)
     if (metas.length === 0) return
     const before = foldCanvas(session.snapshotEvents())
