@@ -54,6 +54,7 @@ import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasSaveAssetRequest, C
 import { CanvasView } from './CanvasView.tsx'
 import type { CanvasUploadedAsset } from './CanvasView.tsx'
 import { CanvasPanelButton } from './CanvasPanelButton.tsx'
+import { CanvasFooterButton } from './CanvasFooterButton.tsx'
 // The generated Remote contribution (TYPERT_REMOTE): a pure descriptor/codec
 // value, inlined by tsdown into lib/client.js (no shared runtime identity).
 import canvasRemote from '@ldd/dsh-canvas/remote'
@@ -373,4 +374,60 @@ export function apply(ctx: ClientContext): void {
       inject: () => ({ open: () => { sidebarCtx.sidebarRight.openTab(CANVAS_KIND) } }),
     }, CanvasPanelButton))
   })
+
+  // --- root sidebar footer: the always-visible entry (no Session needed) -----
+  // The canvas is plugin-owned end to end: this root-scoped footer action is
+  // what makes the entry appear the moment the plugin is installed and vanish
+  // when it is removed — the client itself ships no canvas entry. On click it
+  // ensures a Session exists, then opens the canvas tab, waiting for the
+  // sidebar-right binding (published only once a Session surface is mounted).
+  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
+    name: 'sidebar.footer.action',
+    id: 'canvas-panel',
+    order: 10,
+    inject: () => ({ open: () => openCanvasRoot(ctx) }),
+  }, CanvasFooterButton))
+}
+
+/**
+ * Open the canvas from the root sidebar entry: ensure a Session exists, then
+ * open (or focus) the canvas page tab.
+ *
+ * `sidebarRight.openTab` fails loudly with no mounted session surface, so when
+ * the client has no current Session we first mint/reuse one via the workspace
+ * UI's shared `startSession` action. The sidebar-right binding that `openTab`
+ * reads is published by the session-scoped seat on the next React commit, so we
+ * retry across animation frames until it lands (bounded) rather than assuming
+ * it is ready synchronously.
+ * @param ctx - client root context.
+ */
+function openCanvasRoot(ctx: ClientContext): void {
+  const sessions = ctx.get('sessions') as {
+    list: { getSnapshot(): { current: SessionId | undefined } }
+  } | undefined
+  const uiWorkspace = ctx.get('uiWorkspace') as {
+    startSession(workspaceId?: unknown): void
+  } | undefined
+  const sidebarRight = ctx.get('sidebarRight') as {
+    openTab(kind: string): void
+  } | undefined
+
+  if (sidebarRight === undefined) return
+
+  if (sessions?.list.getSnapshot().current === undefined && uiWorkspace !== undefined) {
+    uiWorkspace.startSession()
+  }
+
+  const tryOpen = (attempt: number): void => {
+    try {
+      sidebarRight.openTab(CANVAS_KIND)
+    } catch (error) {
+      if (attempt < 15) {
+        requestAnimationFrame(() => tryOpen(attempt + 1))
+      } else {
+        console.error('[ldd-canvas] 打开画布失败：', error)
+      }
+    }
+  }
+  tryOpen(0)
 }
