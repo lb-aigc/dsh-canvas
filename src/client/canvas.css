@@ -96,37 +96,49 @@
   stroke-width: 1.2;
 }
 
-/* ---- Root sidebar footer entry: the always-visible way into the canvas ---- */
+/* ---- Root sidebar footer entry: the always-visible way into the canvas ----
+   Geometry mirrors the Settings trigger row (SettingsRoot.module.css) so the
+   two footer rows read as one stack: wide = 42px rounded row, rail = 36×36
+   circle. The glyph is fill="currentColor" like the shipped dsh icon set. */
 .ldd-canvas-footer-button {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
   border: none;
-  border-radius: 6px;
   background: transparent;
-  color: var(--dsw-alias-label-secondary);
   cursor: pointer;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
 }
 
 .ldd-canvas-footer-button--wide {
-  width: 100%;
-  justify-content: flex-start;
-  padding: 0 10px;
-  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  width: calc(100% + 4px);
+  height: 42px;
+  margin: 4px -2px;
+  padding: 0 10px 0 8px;
+  gap: 8px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 22px;
 }
 
-.ldd-canvas-footer-button__label {
-  font-size: 13px;
-  line-height: 1;
-  white-space: nowrap;
+.ldd-canvas-footer-button--rail {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  margin: 8px 0 10px;
+  padding: 0;
+  justify-content: center;
+  gap: 0;
+  border-radius: 50%;
+  corner-shape: round;
 }
 
 .ldd-canvas-footer-button:hover {
-  background: var(--dsw-alias-bg-layer-2);
-  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .ldd-canvas-footer-button:focus-visible {
@@ -134,11 +146,13 @@
   outline-offset: 1px;
 }
 
+.ldd-canvas-footer-button__label {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 .ldd-canvas-footer-button svg {
   flex: none;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.2;
 }
 
 .ldd-canvas-empty {

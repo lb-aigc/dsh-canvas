@@ -9,8 +9,11 @@
  * appears; uninstall it and the button disappears. The client itself ships no
  * canvas entry.
  *
- * It renders an icon in the collapsed rail, and icon + 「画布」 label when the
- * sidebar is expanded, mirroring the shell's own New Session row.
+ * Geometry mirrors the Settings trigger row exactly (the two footer rows sit
+ * stacked above/below each other): the wide button is a 42px rounded-rect row
+ * with an icon + 「画布」 label, the rail button is a 36×36 circle with just the
+ * icon. The glyph is a rounded canvas frame with four node dots, filled in the
+ * same `currentColor` outline style as the shipped dsh icon set.
  */
 import type { ReactNode } from 'react';
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots';
@@ -45,7 +48,7 @@ export type CanvasFooterButtonProps = PropsRuntime<'sidebar.footer.action'> & Ca
 /**
  * The root footer action itself.
  * @param props - the injected opener and the `wide` column state.
- * @returns the canvas icon (rail) or icon + label (expanded).
+ * @returns the canvas icon + label (expanded) or icon-only rail circle.
  */
 export declare function CanvasFooterButton({ open, wide }: CanvasFooterButtonProps): ReactNode;
 //# sourceMappingURL=CanvasFooterButton.d.ts.map
