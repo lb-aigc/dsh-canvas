@@ -127,6 +127,15 @@ const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'])
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.mkv', '.webm'])
 const AUDIO_EXTS = new Set(['.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.opus', '.wma'])
 
+/** `accept` filter per media kind for the native file picker (`.bmp` excluded from
+ *  images: the attachment store's `saveImage` mediaTypes whitelist is
+ *  png/jpeg/webp/gif, so a picked `.bmp` would be silently skipped anyway). */
+const KIND_ACCEPT: Record<'image' | 'video' | 'music', string> = {
+  image: '.png,.jpg,.jpeg,.webp,.gif',
+  video: '.mp4,.mov,.mkv,.webm',
+  music: '.mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.wma',
+}
+
 /** Map one uploaded file name to a canvas media kind, or undefined when unsupported. */
 function mediaKindOf(fileName: string): 'image' | 'video' | 'music' | undefined {
   const dot = fileName.lastIndexOf('.')
@@ -173,12 +182,14 @@ function fileToBase64(file: File): Promise<string> {
   })
 }
 
-/** Open the native file picker and resolve the chosen files (empty on cancel). */
-function openFilePicker(): Promise<File[]> {
+/** Open the native file picker and resolve the chosen files (empty on cancel).
+ *  @param accept - optional `input.accept` filter (e.g. '.png,.jpg' for images). */
+function openFilePicker(accept?: string): Promise<File[]> {
   return new Promise((resolve) => {
     const input = document.createElement('input')
     input.type = 'file'
     input.multiple = true
+    if (accept !== undefined) input.accept = accept
     input.hidden = true
     let settled = false
     input.onchange = () => {
@@ -282,7 +293,8 @@ function createCanvasFace(ctx: ClientContext) {
         unwrap(await remoteOf().moveNode(sessionId, nodeId, x, y), 'moveNode'),
       link: async (request: CanvasLinkRequest): Promise<CanvasState> =>
         unwrap(await remoteOf().link(sessionId, request), 'link'),
-      pickFiles: async (): Promise<File[]> => openFilePicker(),
+      pickFiles: async (kind?: 'image' | 'video' | 'music'): Promise<File[]> =>
+        openFilePicker(kind === undefined ? undefined : KIND_ACCEPT[kind]),
       uploadFiles: async (files: File[]): Promise<CanvasUploadedAsset[]> => {
         if (files.length === 0) return []
         // Resolve the session workspace cwd once (needed for verbatim video/audio

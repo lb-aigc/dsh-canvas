@@ -59,7 +59,7 @@ export interface CanvasViewInjected extends CanvasWriteback {
   loadImage: (ref: CanvasReadAssetRequest) => Promise<string>
   ask: (text: string) => Promise<void>
   /** Open the native file picker (menu-bar upload). */
-  pickFiles: () => Promise<File[]>
+  pickFiles: (kind?: 'image' | 'video' | 'music') => Promise<File[]>
   /** Store the given files (image → attachment, video/audio → workspace) and
    *  return the ones that map to a canvas asset kind. */
   uploadFiles: (files: File[]) => Promise<CanvasUploadedAsset[]>
@@ -550,23 +550,6 @@ export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFil
   // to that source in the same breath, so the dashed ghost becomes a solid edge.
   // Await addNode BEFORE link — the write-back is fire-and-forget otherwise and
   // a concurrent link could reach the host before the target node exists.
-  const addAssetNode = async (kind: 'image' | 'video' | 'music', label: string): Promise<void> => {
-    if (menu === null) return
-    const { flowX, flowY, sourceNodeId } = menu
-    const id = newId()
-    try {
-      await addNode({ id, kind, label, x: flowX, y: flowY })
-      if (sourceNodeId !== undefined) await link({ source: sourceNodeId, target: id })
-    } catch (error) {
-      console.error('[ldd-canvas] add-node (drag-to-create) failed:', error)
-      setWritebackError(`新增节点失败: ${error instanceof Error ? error.message : String(error)}`)
-    }
-    setMenu(null)
-  }
-
-  // Place a card for each stored asset at (flowX, flowY), grid-laid. Images
-  // carry their attachment id (+ size) so the card renders the picture; on a
-  // drag-to-create, the first asset wires to the source.
   const placeAssets = async (assets: CanvasUploadedAsset[], flowX: number, flowY: number, sourceNodeId?: string): Promise<void> => {
     for (let index = 0; index < assets.length; index += 1) {
       const asset = assets[index]!
@@ -595,11 +578,13 @@ export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFil
     }
   }
 
-  // Menu-bar upload: open the picker, store the files, place the cards.
-  const uploadAssets = async (): Promise<void> => {
+  // Menu-bar upload: open the type-filtered picker, store the files, place the
+  // cards at the menu spot. `kind` pre-filters the picker to that media type
+  // (the three menu buttons pass image/music/video respectively).
+  const uploadAssets = async (kind: 'image' | 'video' | 'music'): Promise<void> => {
     if (menu === null) return
     const { flowX, flowY, sourceNodeId } = menu
-    const files = await pickFiles()
+    const files = await pickFiles(kind)
     if (files.length === 0) { setMenu(null); return }
     const assets = await uploadFiles(files).catch((error: unknown) => {
       const msg = error instanceof Error ? error.message : String(error)
@@ -760,16 +745,15 @@ export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFil
 
           {canvas.nodes.length === 0 && (
             <div className="ldd-canvas-empty-hint">
-              画布为空。双击画布添加节点，或在对话中让智能体往画布添加内容。
+              画布为空。双击画布上传图片/音频/视频，或在对话中让智能体往画布添加内容。
             </div>
           )}
 
           {menu !== null && (
             <div className="ldd-canvas-menu" style={{ left: menu.x, top: menu.y }}>
-              <button type="button" onClick={() => { void uploadAssets() }}>上传</button>
-              <button type="button" onClick={() => { void addAssetNode('image', '新图片') }}>图片</button>
-              <button type="button" onClick={() => { void addAssetNode('music', '新音频') }}>音频</button>
-              <button type="button" onClick={() => { void addAssetNode('video', '新视频') }}>视频</button>
+              <button type="button" onClick={() => { void uploadAssets('image') }}>上传图片</button>
+              <button type="button" onClick={() => { void uploadAssets('music') }}>上传音频</button>
+              <button type="button" onClick={() => { void uploadAssets('video') }}>上传视频</button>
             </div>
           )}
 

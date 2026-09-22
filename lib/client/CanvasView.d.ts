@@ -16,7 +16,7 @@ export interface CanvasViewInjected extends CanvasWriteback {
     loadImage: (ref: CanvasReadAssetRequest) => Promise<string>;
     ask: (text: string) => Promise<void>;
     /** Open the native file picker (menu-bar upload). */
-    pickFiles: () => Promise<File[]>;
+    pickFiles: (kind?: 'image' | 'video' | 'music') => Promise<File[]>;
     /** Store the given files (image → attachment, video/audio → workspace) and
      *  return the ones that map to a canvas asset kind. */
     uploadFiles: (files: File[]) => Promise<CanvasUploadedAsset[]>;
