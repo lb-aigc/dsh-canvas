@@ -1,0 +1,562 @@
+/* @ldd/dsh-canvas — node card styles + React Flow theme mapping.
+ *
+ * Imported as a GLOBAL sheet (`.css`, NOT `?inline`): the client bundle's
+ * `dsh-css-global-inline` loader auto-injects it as a <style> tag at factory
+ * execution. (`?inline` only exports the compiled text and does NOT inject —
+ * that was the blank-canvas bug.)
+ *
+ * `react-flow.css` (also global) carries the official React Flow style.css;
+ * THIS sheet adds the container layout React Flow leaves to the host, maps
+ * React Flow's `--xy-*` theme variables onto the design-platform
+ * `--dsw-alias-*` tokens (so the canvas tracks body[data-ds-dark-theme]), and
+ * styles the LDD node cards. */
+
+/* ---- container layout (React Flow's own CSS omits this) ---- */
+.react-flow {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ---- map React Flow theme vars onto design tokens ---- */
+.react-flow {
+  --xy-edge-stroke: var(--dsw-alias-label-secondary);
+  --xy-edge-stroke-selected: var(--dsw-alias-label-primary);
+  --xy-edge-stroke-width: 1.5;
+  --xy-background-color: var(--dsw-alias-bg-base);
+  --xy-background-pattern-dots-color: var(--dsw-alias-border-l3);
+  --xy-minimap-background-color: var(--dsw-alias-bg-layer-1);
+  --xy-minimap-mask-background-color: var(--dsw-alias-bg-mask-3);
+  --xy-minimap-node-background-color: var(--dsw-alias-label-tertiary);
+  --xy-controls-button-background-color: var(--dsw-alias-bg-layer-1);
+  --xy-controls-button-background-color-hover: var(--dsw-alias-bg-layer-2);
+  --xy-controls-button-color: var(--dsw-alias-label-primary);
+  --xy-controls-button-color-hover: var(--dsw-alias-label-primary);
+  --xy-controls-button-border-color: var(--dsw-alias-border-l1);
+  --xy-edge-label-background-color: var(--dsw-alias-bg-layer-1);
+  --xy-edge-label-color: var(--dsw-alias-label-secondary);
+  --xy-node-background-color: var(--dsw-alias-bg-layer-1);
+  --xy-node-border: 1px solid var(--dsw-alias-border-l1);
+  --xy-node-color: var(--dsw-alias-label-primary);
+  --xy-handle-background-color: var(--dsw-alias-label-secondary);
+  --xy-handle-border-color: var(--dsw-alias-bg-layer-1);
+}
+
+/* ---- LDD node cards ----
+ * The two seats hand the canvas different boxes: the Conversation view tab gives
+ * it a block box (where `width/height: 100%` does the work), while the right
+ * Sidebar's tab body is `display:flex; min-height:0; flex:auto` (the kit's
+ * `.panelBody`), where the canvas has to BE a flex item to get a definite
+ * height. Both are declared so one sheet serves both seats. */
+.ldd-canvas-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.ldd-canvas-root > .react-flow {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ---- Session header utility: the way into the right Sidebar's canvas tab ---- */
+.ldd-canvas-header-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.ldd-canvas-header-button:hover {
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+}
+
+.ldd-canvas-header-button:focus-visible {
+  outline: 2px solid var(--dsw-alias-border-l3);
+  outline-offset: 1px;
+}
+
+.ldd-canvas-header-button svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+}
+
+.ldd-canvas-empty {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  padding: 24px;
+  text-align: center;
+}
+
+/* ---- node card frame ---- */
+.ldd-canvas-node {
+  position: relative;
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  min-width: 140px;
+  max-width: 240px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06);
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+  transition: box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+.ldd-canvas-node:hover {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  border-color: var(--dsw-alias-border-l2);
+}
+
+/* Kind accent strip (left border). */
+.ldd-canvas-node[data-kind='image'] { border-left: 3px solid #6366f1; max-width: 360px; }
+.ldd-canvas-node[data-kind='video'] { border-left: 3px solid #f59e0b; }
+.ldd-canvas-node[data-kind='music'] { border-left: 3px solid #10b981; }
+.ldd-canvas-node[data-kind='text'] { border-left: 3px solid #3b82f6; }
+.ldd-canvas-node[data-kind='note'] { border-left: 3px solid #a855f7; }
+
+/* ---- card head: kind glyph + caption + one meta fact ---- */
+.ldd-canvas-node-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.ldd-canvas-node-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.ldd-canvas-node-kind svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ldd-canvas-node-fact {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- image body ---- */
+/* Size comes from the inline style (aspect-ratio computed in the card); the
+   `object-fit: cover` is safe because the box already matches the ratio. */
+.ldd-canvas-node-image {
+  display: block;
+  object-fit: cover;
+}
+
+.ldd-canvas-image-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 90px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  border-bottom: 1px dashed var(--dsw-alias-border-l3);
+}
+
+.ldd-canvas-image-placeholder svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+}
+
+/* ---- media (video/music) placeholder body ---- */
+.ldd-canvas-node-media {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 12px;
+}
+
+.ldd-canvas-node-media-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+}
+
+.ldd-canvas-node-media-glyph svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ldd-canvas-node-media-caption {
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ---- text / note body ---- */
+.ldd-canvas-node-text {
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ldd-canvas-node[data-kind='note'] .ldd-canvas-node-text {
+  background: linear-gradient(180deg, rgba(168, 85, 247, 0.06), transparent);
+}
+
+.ldd-canvas-node-text-empty {
+  color: var(--dsw-alias-label-tertiary);
+  font-style: italic;
+}
+
+/* ---- bottom title ---- */
+.ldd-canvas-node-label {
+  padding: 8px 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+}
+
+/* Handles are the link endpoints: dim by default, bright on hover so the user
+ * can grab them to drag a connection between two nodes. */
+.ldd-canvas-handle {
+  width: 8px;
+  height: 8px;
+  opacity: 0.35;
+  transition: opacity 0.12s ease;
+}
+
+.ldd-canvas-node:hover .ldd-canvas-handle {
+  opacity: 1;
+}
+
+/* ---- node delete button (hover-revealed, top-right) ---- */
+.ldd-canvas-node-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+.ldd-canvas-node:hover .ldd-canvas-node-delete {
+  opacity: 1;
+}
+
+.ldd-canvas-node-delete:hover {
+  background: var(--dsw-alias-bg-layer-3, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-danger, #ef4444);
+}
+
+.ldd-canvas-node-delete svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---- empty-canvas hint (overlaid, non-blocking) ---- */
+.ldd-canvas-empty-hint {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  max-width: 320px;
+  padding: 14px 18px;
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px dashed var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  z-index: 4;
+}
+
+/* ---- add-node menu (double-click empty canvas) ---- */
+.ldd-canvas-menu {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 128px;
+  padding: 4px;
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+}
+
+.ldd-canvas-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 13px;
+  text-align: left;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.ldd-canvas-menu button:hover {
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+/* ---- drag-to-create ghost target (dashed ＋ marker at the release point) ---- */
+.ldd-canvas-draft-target {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ldd-canvas-draft-plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 2px dashed var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 18px;
+  line-height: 1;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+/* ---- edit bar (a selected node → rename / content / delete / ask) ---- */
+.ldd-canvas-edit {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(520px, calc(100% - 32px));
+  padding: 10px 12px;
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+  z-index: 10;
+}
+
+.ldd-canvas-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ldd-canvas-edit-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+
+.ldd-canvas-edit-kind svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ldd-canvas-edit-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: 13px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  outline: none;
+}
+
+.ldd-canvas-edit-label:focus {
+  border-color: var(--dsw-alias-border-l3);
+}
+
+.ldd-canvas-edit-save {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  background: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-bg-base);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ldd-canvas-edit-delete {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-danger, #ef4444);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ldd-canvas-edit-delete:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.ldd-canvas-edit-content {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.ldd-canvas-edit-content:focus {
+  border-color: var(--dsw-alias-border-l3);
+}
+
+.ldd-canvas-edit-ask {
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  padding-top: 8px;
+}
+
+/* ---- ask bar (a clicked node → ask the agent about it) ---- */
+.ldd-canvas-ask {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+  z-index: 10;
+}
+
+.ldd-canvas-ask-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ldd-canvas-ask-input {
+  width: 260px;
+  padding: 6px 10px;
+  font-size: 13px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  outline: none;
+}
+
+.ldd-canvas-ask-input:focus {
+  border-color: var(--dsw-alias-border-l3);
+}
+
+.ldd-canvas-ask-submit {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  background: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-bg-base);
+  cursor: pointer;
+}
+
+.ldd-canvas-ask-submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
