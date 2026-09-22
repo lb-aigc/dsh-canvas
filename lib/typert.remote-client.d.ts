@@ -4,7 +4,7 @@ import type {
   TypertRemoteContribution,
 } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasState, CanvasUpdateNodeRequest } from '@ldd/dsh-canvas/types'
+import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasState, CanvasUpdateNodeRequest } from '@ldd/dsh-canvas/types'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$63616e766173 {
@@ -12,6 +12,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     inspect: (sessionId: SessionId) => Promise<RemoteResult<CanvasState>>
     link: (sessionId: SessionId, request: CanvasLinkRequest) => Promise<RemoteResult<CanvasState>>
     moveNode: (sessionId: SessionId, nodeId: string, x: number, y: number) => Promise<RemoteResult<CanvasState>>
+    readAsset: (sessionId: SessionId, request: CanvasReadAssetRequest) => Promise<RemoteResult<CanvasReadAssetValue>>
     removeNode: (sessionId: SessionId, nodeId: string) => Promise<RemoteResult<CanvasState>>
     saveAsset: (sessionId: SessionId, request: CanvasSaveAssetRequest) => Promise<RemoteResult<CanvasSaveAssetValue>>
     updateNode: (sessionId: SessionId, nodeId: string, patch: CanvasUpdateNodeRequest) => Promise<RemoteResult<CanvasState>>
@@ -21,6 +22,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'canvas/inspect': (sessionId: SessionId) => Promise<RemoteResult<CanvasState>>
     'canvas/link': (sessionId: SessionId, request: CanvasLinkRequest) => Promise<RemoteResult<CanvasState>>
     'canvas/moveNode': (sessionId: SessionId, nodeId: string, x: number, y: number) => Promise<RemoteResult<CanvasState>>
+    'canvas/readAsset': (sessionId: SessionId, request: CanvasReadAssetRequest) => Promise<RemoteResult<CanvasReadAssetValue>>
     'canvas/removeNode': (sessionId: SessionId, nodeId: string) => Promise<RemoteResult<CanvasState>>
     'canvas/saveAsset': (sessionId: SessionId, request: CanvasSaveAssetRequest) => Promise<RemoteResult<CanvasSaveAssetValue>>
     'canvas/updateNode': (sessionId: SessionId, nodeId: string, patch: CanvasUpdateNodeRequest) => Promise<RemoteResult<CanvasState>>

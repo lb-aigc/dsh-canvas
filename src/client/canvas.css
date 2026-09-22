@@ -242,7 +242,9 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 90px;
+  /* Width/height come from the inline style (4:3 default, or the image ratio
+     once the node carries `meta`) so an empty image node reads as a 4:3 card. */
+  box-sizing: border-box;
   background: var(--dsw-alias-bg-layer-2);
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;

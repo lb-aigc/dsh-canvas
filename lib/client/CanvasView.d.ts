@@ -1,6 +1,6 @@
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots';
 import type { CanvasState } from '../model.ts';
-import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasUpdateNodeRequest } from '../types.ts';
+import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasUpdateNodeRequest } from '../types.ts';
 import './react-flow.css';
 import './canvas.css';
 /** The write-back verbs the seat face exposes (the client half of CanvasService). */
@@ -13,7 +13,7 @@ export interface CanvasWriteback {
 }
 /** Injected per-session canvas face: image loader + one-shot agent prompt + write-back. */
 export interface CanvasViewInjected extends CanvasWriteback {
-    loadImage: (attachmentId: string) => Promise<string>;
+    loadImage: (ref: CanvasReadAssetRequest) => Promise<string>;
     ask: (text: string) => Promise<void>;
     /** Open the native file picker (menu-bar upload). */
     pickFiles: () => Promise<File[]>;
@@ -31,6 +31,10 @@ export interface CanvasUploadedAsset {
     width?: number;
     /** Normalized image height in px (images only). */
     height?: number;
+    /** Verified media type of the stored image (images only). */
+    mediaType?: string;
+    /** Exact encoded byte length of the stored image (images only). */
+    bytes?: number;
 }
 /**
  * What the canvas needs from a seat, spelled structurally so ONE component can

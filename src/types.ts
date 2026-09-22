@@ -64,4 +64,34 @@ export interface CanvasSaveAssetValue {
   width?: number
   /** Normalized image height in px (images only). */
   height?: number
+  /** Verified media type of the stored normalized image (images only). */
+  mediaType?: string
+  /** Exact encoded byte length of the stored normalized image (images only). */
+  bytes?: number
+}
+
+/** Input to {@link CanvasService.readAsset}: the full durable reference needed to
+ *  read one canvas image back through the attachment store. The client keeps
+ *  these fields in the node's `meta` so the image can be loaded without going
+ *  through the session-controller's prompt-attachment authorization (a canvas
+ *  image is NOT a prompt image block). */
+export interface CanvasReadAssetRequest {
+  /** `sha256:...` attachment id (the node's `url`). */
+  attachmentId: string
+  /** Verified media type (matches the stored normalized image). */
+  mediaType: string
+  /** Exact encoded byte length. */
+  bytes: number
+  /** Normalized width in px. */
+  width: number
+  /** Normalized height in px. */
+  height: number
+}
+
+/** Result of {@link CanvasService.readAsset}: verified image bytes as base64. */
+export interface CanvasReadAssetValue {
+  /** Verified media type of the returned bytes. */
+  mediaType: string
+  /** Canonical base64 of the image bytes. */
+  dataBase64: string
 }

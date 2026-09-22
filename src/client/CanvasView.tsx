@@ -37,7 +37,7 @@ import type { Edge, FinalConnectionState, Node, NodeTypes, OnConnect, OnConnectS
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { newId } from '../model.ts'
 import type { CanvasNode, CanvasState, JsonValue } from '../model.ts'
-import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasUpdateNodeRequest } from '../types.ts'
+import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasUpdateNodeRequest } from '../types.ts'
 import './react-flow.css'
 import './canvas.css'
 
@@ -56,7 +56,7 @@ export interface CanvasWriteback {
 
 /** Injected per-session canvas face: image loader + one-shot agent prompt + write-back. */
 export interface CanvasViewInjected extends CanvasWriteback {
-  loadImage: (attachmentId: string) => Promise<string>
+  loadImage: (ref: CanvasReadAssetRequest) => Promise<string>
   ask: (text: string) => Promise<void>
   /** Open the native file picker (menu-bar upload). */
   pickFiles: () => Promise<File[]>
@@ -75,6 +75,10 @@ export interface CanvasUploadedAsset {
   width?: number
   /** Normalized image height in px (images only). */
   height?: number
+  /** Verified media type of the stored image (images only). */
+  mediaType?: string
+  /** Exact encoded byte length of the stored image (images only). */
+  bytes?: number
 }
 
 /**
@@ -104,7 +108,7 @@ export interface CanvasViewProps {
   link: CanvasWriteback['link']
 }
 
-const LoadImageContext = createContext<(attachmentId: string) => Promise<string>>(
+const LoadImageContext = createContext<(ref: CanvasReadAssetRequest) => Promise<string>>(
   async () => { throw new Error('canvas: no image loader injected') },
 )
 
@@ -233,12 +237,24 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
       setResolved(null)
       return
     }
+    // Rebuild the full durable reference from the node's meta. A canvas image
+    // carries its media type / byte length / size in `meta` (written at upload
+    // time) so `loadImage` can read it back through the canvas's own channel.
+    const meta = data.meta
+    const mediaType = typeof meta?.mediaType === 'string' ? meta.mediaType : undefined
+    const bytes = typeof meta?.bytes === 'number' ? meta.bytes : undefined
+    const width = typeof meta?.width === 'number' ? meta.width : undefined
+    const height = typeof meta?.height === 'number' ? meta.height : undefined
+    if (mediaType === undefined || bytes === undefined || width === undefined || height === undefined) {
+      setResolved(null)
+      return
+    }
     let cancelled = false
-    loadImage(url)
+    loadImage({ attachmentId: url, mediaType, bytes, width, height })
       .then((resolvedUrl) => { if (!cancelled) setResolved(resolvedUrl) })
       .catch(() => { if (!cancelled) setResolved(null) })
     return () => { cancelled = true }
-  }, [data.kind, data.url, loadImage])
+  }, [data.kind, data.url, data.meta, loadImage])
 
   // Resolve an image node's <img> src. `sha256:` → loaded blob; http(s) → verbatim;
   // anything else (mock-image://, empty) → null → render a friendly placeholder
@@ -295,7 +311,7 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
       {data.kind === 'image' && (
         src !== null
           ? <img className="ldd-canvas-node-image" src={src} alt={data.label} style={{ width: displayW, height: displayH }} />
-          : <div className="ldd-canvas-node-image ldd-canvas-image-placeholder">{kindIcon('image')}图片</div>
+          : <div className="ldd-canvas-node-image ldd-canvas-image-placeholder" style={{ width: displayW, height: displayH }}>{kindIcon('image')}图片</div>
       )}
 
       {data.kind === 'video' && (
@@ -558,7 +574,12 @@ export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFil
       const row = Math.floor(index / 3)
       const id = newId()
       const meta = asset.width !== undefined && asset.height !== undefined
-        ? { width: asset.width, height: asset.height }
+        ? {
+          width: asset.width,
+          height: asset.height,
+          ...(asset.mediaType === undefined ? {} : { mediaType: asset.mediaType }),
+          ...(asset.bytes === undefined ? {} : { bytes: asset.bytes }),
+        }
         : undefined
       try {
         await addNode({

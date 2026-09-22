@@ -19,7 +19,7 @@ import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import type { Context } from '@deepseek-ai/cordis';
 import type { SessionId } from '@deepseek-ai/dsh-session/types';
 import type { CanvasState } from './types.ts';
-import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasUpdateNodeRequest } from './types.ts';
+import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasUpdateNodeRequest } from './types.ts';
 export declare class CanvasService extends TypertRemoteService {
     static inject: string[];
     constructor(ctx: Context);
@@ -42,5 +42,12 @@ export declare class CanvasService extends TypertRemoteService {
      *  attachment id (+ normalized image size). The client stores the id as the
      *  node's `url` so `loadImage` can read it back. */
     saveAsset(sessionId: SessionId, request: CanvasSaveAssetRequest): Promise<CanvasSaveAssetValue>;
+    /** Read one canvas image back by its full durable reference. This is the
+     *  canvas's OWN read channel: unlike session-controller's `readAttachment`,
+     *  it does NOT require the image to be referenced as a prompt image block in
+     *  the session log (a canvas image is stored by `saveAsset` and referenced
+     *  only by its node's `url`/`meta`). It re-verifies the stored bytes against
+     *  the reference and returns them as base64 for the browser to render. */
+    readAsset(sessionId: SessionId, request: CanvasReadAssetRequest): Promise<CanvasReadAssetValue>;
 }
 //# sourceMappingURL=remote.d.ts.map

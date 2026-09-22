@@ -50,7 +50,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 // sidebar.right.pane.tab seat declaration.
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { CanvasState } from '../model.ts'
-import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasUpdateNodeRequest } from '../types.ts'
+import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasUpdateNodeRequest } from '../types.ts'
 import { CanvasView } from './CanvasView.tsx'
 import type { CanvasUploadedAsset } from './CanvasView.tsx'
 import { CanvasPanelButton } from './CanvasPanelButton.tsx'
@@ -91,6 +91,7 @@ interface CanvasRemoteNamespaceLike {
   link(sessionId: string, request: CanvasLinkRequest): Promise<CanvasRemoteResult<CanvasState>>
   inspect(sessionId: string): Promise<CanvasRemoteResult<CanvasState>>
   saveAsset(sessionId: string, request: CanvasSaveAssetRequest): Promise<CanvasRemoteResult<CanvasSaveAssetValue>>
+  readAsset(sessionId: string, request: CanvasReadAssetRequest): Promise<CanvasRemoteResult<CanvasReadAssetValue>>
 }
 
 /** The Remote carrier as this package reaches it (mount + the canvas namespace). */
@@ -257,12 +258,15 @@ function createCanvasFace(ctx: ClientContext) {
       return result.value!
     }
     return {
-      loadImage: async (attachmentId: string): Promise<string> => {
-        const session = sessionOf()
-        const result = await session.readAttachment(attachmentId)
-        if (!result.ok) throw new Error(`${result.error?.code ?? 'error'}: ${result.error?.message ?? ''}`)
-        const bytes = Uint8Array.from(result.value!.data)
-        return URL.createObjectURL(new Blob([bytes.buffer], { type: result.value!.attachment.mediaType }))
+      loadImage: async (ref: CanvasReadAssetRequest): Promise<string> => {
+        // Read through the canvas's own read channel (not session.readAttachment):
+        // the latter requires the image to be a prompt image block in the session
+        // log, but a canvas image is only referenced by its node url/meta.
+        const saved = unwrap(await remoteOf().readAsset(sessionId, ref), 'readAsset')
+        const binary = atob(saved.dataBase64)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+        return URL.createObjectURL(new Blob([bytes.buffer], { type: saved.mediaType }))
       },
       ask: async (text: string): Promise<void> => {
         const session = sessionOf()
@@ -313,6 +317,8 @@ function createCanvasFace(ctx: ClientContext) {
               name: file.name, kind, attachmentId: saved.attachmentId,
               ...(saved.width === undefined ? {} : { width: saved.width }),
               ...(saved.height === undefined ? {} : { height: saved.height }),
+              ...(saved.mediaType === undefined ? {} : { mediaType: saved.mediaType }),
+              ...(saved.bytes === undefined ? {} : { bytes: saved.bytes }),
             })
             continue
           }

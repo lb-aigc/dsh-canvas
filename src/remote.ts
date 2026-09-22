@@ -22,9 +22,9 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
 import { addEdge, addNode, emptyCanvas, removeNode, updateNode } from './model.ts'
 import type { CanvasNode, CanvasState } from './types.ts'
-import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasUpdateNodeRequest } from './types.ts'
+import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasUpdateNodeRequest } from './types.ts'
 
-/** Structural face of `ctx.attachments` (dsh-attachment). Shims the two write
+/** Structural face of `ctx.attachments` (dsh-attachment). Shims the read/write
  *  entry points so this package does NOT add a dsh-attachment dependency edge
  *  (that would re-trigger the pnpm-lockfile git-fetch deadlock). The runtime
  *  object is the real AttachmentStore, byte-identical. */
@@ -33,8 +33,17 @@ interface AttachmentStoreLike {
     attachmentId: string
     width: number
     height: number
+    mediaType: string
+    bytes: number
   }>
   saveFile(input: { data: Uint8Array; name?: string }): Promise<{ attachmentId: string }>
+  readImage(ref: {
+    attachmentId: string
+    mediaType: string
+    bytes: number
+    width: number
+    height: number
+  }): Promise<{ ref: { mediaType: string }; data: Uint8Array }>
 }
 
 /** Fold the current canvas state out of the session log (last `canvas/state` wins). */
@@ -151,9 +160,41 @@ export class CanvasService extends TypertRemoteService {
     if (request.kind === 'image') {
       if (request.mediaType === undefined) throw new Error('canvas: 图片上传缺少媒体类型')
       const ref = await attachments.saveImage({ data, mediaType: request.mediaType, name: request.name })
-      return { attachmentId: ref.attachmentId, width: ref.width, height: ref.height }
+      return {
+        attachmentId: ref.attachmentId,
+        width: ref.width,
+        height: ref.height,
+        mediaType: ref.mediaType,
+        bytes: ref.bytes,
+      }
     }
     const ref = await attachments.saveFile({ data, name: request.name })
     return { attachmentId: ref.attachmentId }
+  }
+
+  /** Read one canvas image back by its full durable reference. This is the
+   *  canvas's OWN read channel: unlike session-controller's `readAttachment`,
+   *  it does NOT require the image to be referenced as a prompt image block in
+   *  the session log (a canvas image is stored by `saveAsset` and referenced
+   *  only by its node's `url`/`meta`). It re-verifies the stored bytes against
+   *  the reference and returns them as base64 for the browser to render. */
+  @Remote('readAsset')
+  async readAsset(sessionId: SessionId, request: CanvasReadAssetRequest): Promise<CanvasReadAssetValue> {
+    // Authorization: the owning session must exist (same check as every other
+    // verb). The attachment store then verifies the bytes against the ref.
+    this.sessionOf(sessionId)
+    const attachments = (this.ctx as unknown as { attachments?: AttachmentStoreLike }).attachments
+    if (attachments === undefined) throw new Error('canvas: 附件存储不可用')
+    const stored = await attachments.readImage({
+      attachmentId: request.attachmentId,
+      mediaType: request.mediaType,
+      bytes: request.bytes,
+      width: request.width,
+      height: request.height,
+    })
+    return {
+      mediaType: stored.ref.mediaType,
+      dataBase64: Buffer.from(stored.data).toString('base64'),
+    }
   }
 }
