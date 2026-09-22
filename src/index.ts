@@ -141,6 +141,57 @@ function foldCanvas(events: readonly SessionEvent[]): CanvasState {
   return state
 }
 
+/** Serializable image attachment reference (the same shape generate's
+ *  `attachImageFromUrl` emits as an `image` content block's `attachment`). */
+interface GeneratedImageMeta {
+  attachmentId: string
+  mediaType?: string
+  bytes?: number
+  width?: number
+  height?: number
+  name?: string
+}
+
+/** Recurse into a content-block array and collect every `image` block's
+ *  attachment reference, descending through `tool-result` blocks (generate's
+ *  `generate_image` renders images inside its tool result). */
+function collectImageMetas(content: unknown, out: GeneratedImageMeta[]): void {
+  if (!Array.isArray(content)) return
+  for (const value of content) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue
+    const block = value as { readonly type?: unknown; readonly attachment?: unknown; readonly content?: unknown }
+    if (block.type === 'image' && typeof block.attachment === 'object' && block.attachment !== null) {
+      const ref = block.attachment as GeneratedImageMeta
+      if (typeof ref.attachmentId === 'string') out.push(ref)
+    } else if (block.type === 'tool-result') {
+      collectImageMetas(block.content, out)
+    }
+  }
+}
+
+/** Pull every generated image out of one `assistant/message` event — both the
+ *  expanded `message.content` (incl. tool-result nesting) and the compact
+ *  `stream` records' `block-end` chunks — so a generated picture is captured
+ *  regardless of which durable form the settlement stored it in. */
+function generatedImagesOf(event: SessionEvent): GeneratedImageMeta[] {
+  const data = event.data as {
+    readonly message?: { readonly content?: unknown }
+    readonly stream?: unknown
+  }
+  const metas: GeneratedImageMeta[] = []
+  collectImageMetas(data.message?.content, metas)
+  if (Array.isArray(data.stream)) {
+    for (const record of data.stream) {
+      if (typeof record !== 'object' || record === null) continue
+      const chunk = (record as { readonly chunk?: unknown }).chunk
+      if (typeof chunk !== 'object' || chunk === null) continue
+      const raw = chunk as { readonly type?: unknown; readonly block?: unknown }
+      if (raw.type === 'block-end') collectImageMetas([raw.block], metas)
+    }
+  }
+  return metas
+}
+
 /** Serialize one canvas for the model-facing inspect result. */
 function describeCanvas(state: CanvasState): string {
   if (state.nodes.length === 0) return '画布当前为空。'
@@ -341,6 +392,39 @@ export function apply(ctx: Context): void {
 
   const disposers = defineCanvasTools().map((tool) => ctx.tools.register(tool))
   ctx.effect(() => () => { for (const dispose of disposers) dispose() }, 'ldd-canvas: dispose tools')
+
+  // Auto-mirror generated images onto the canvas: whenever an agent turn settles
+  // an `assistant/message`, capture every image block it produced (generate_image
+  // renders its results as `image` blocks) and add each as a canvas image node —
+  // unless the canvas already carries that attachment. Media is normally produced
+  // by describing it in the agent input, so the canvas keeps an up-to-date board
+  // of generated assets without the agent having to call canvas_* tools by hand.
+  ctx.on('session/event', (session, event) => {
+    if (event.type !== 'assistant/message') return
+    const metas = generatedImagesOf(event)
+    if (metas.length === 0) return
+    const before = foldCanvas(session.snapshotEvents())
+    let next = before
+    for (const meta of metas) {
+      if (next.nodes.some((node) => node.url === meta.attachmentId)) continue
+      const auto = next.nodes.length
+      const result = addNode(next, {
+        kind: 'image',
+        label: meta.name ?? '生成图片',
+        x: (auto % 4) * 220,
+        y: Math.floor(auto / 4) * 180,
+        url: meta.attachmentId,
+        meta: {
+          ...(meta.width === undefined ? {} : { width: meta.width }),
+          ...(meta.height === undefined ? {} : { height: meta.height }),
+          ...(meta.mediaType === undefined ? {} : { mediaType: meta.mediaType }),
+          ...(meta.bytes === undefined ? {} : { bytes: meta.bytes }),
+        },
+      })
+      next = result.state
+    }
+    if (next.nodes.length !== before.nodes.length) session.append('canvas/state', { state: next })
+  })
 
   // The write-back Remote service. `new CanvasService(ctx)` registers `ctx.canvas`
   // (cordis Service auto-provides on the owning fiber) AND binds it to the
