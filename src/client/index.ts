@@ -239,9 +239,14 @@ function createCanvasFace(ctx: ClientContext) {
       return session
     }
     const remoteOf = (): CanvasRemoteNamespaceLike => {
-      const remote = ctx.get('remote') as CanvasRemoteLike | undefined
-      if (remote === undefined) throw new Error('canvas: 写回通道不可用（remote 服务未挂载）')
-      const canvas = remote.canvas
+      // Read the namespace through ctx.get('remote.canvas') — a reflect.get
+      // (isolation-keyed store lookup) that does NOT run the proxy's inject
+      // check. Reading `remote.canvas` as a property would instead be re-routed
+      // by the traceable proxy to ctx['remote.canvas'] and throw
+      // "cannot get property remote.canvas without inject", because this
+      // package $mounts its own namespace (so it cannot declare the service in
+      // the static `inject` list — that would dead-lock apply).
+      const canvas = ctx.get('remote.canvas') as CanvasRemoteNamespaceLike | undefined
       if (canvas === undefined) {
         throw new Error(`canvas: 写回通道不可用（remote.canvas 命名空间未挂载${mountFailure === null ? '' : `，mount 失败：${mountFailure}`}）`)
       }
@@ -277,10 +282,18 @@ function createCanvasFace(ctx: ClientContext) {
       uploadFiles: async (files: File[]): Promise<CanvasUploadedAsset[]> => {
         if (files.length === 0) return []
         // Resolve the session workspace cwd once (needed for verbatim video/audio
-        // import so the agent's tools can read them by path).
+        // import so the agent's tools can read them by path). Read through
+        // ctx.get('remote.session') for the same reason as remoteOf(): the
+        // session namespace is a cordis service, and property access would trip
+        // the proxy's inject check.
         let cwd: string | undefined
-        const remote = ctx.get('remote') as CanvasRemoteLike | undefined
-        const listed = await remote?.session?.list({})
+        const sessionRemote = ctx.get('remote.session') as {
+          list(request: Record<string, never>): Promise<{
+            ok: boolean
+            value: { items: Array<{ sessionId: SessionId; cwd?: string }> }
+          }>
+        } | undefined
+        const listed = await sessionRemote?.list({})
         cwd = listed?.ok === true
           ? listed.value.items.find((item) => item.sessionId === sessionId)?.cwd
           : undefined
