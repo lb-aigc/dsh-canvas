@@ -49,7 +49,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 // Type-only: pulls ctx.sidebarRight / ctx.sidebarRightTabs and the keyed
 // sidebar.right.pane.tab seat declaration.
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
-import type { CanvasState } from '../model.ts'
+import type { CanvasState, CanvasNode, JsonValue } from '../model.ts'
 import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasUpdateNodeRequest } from '../types.ts'
 import { CanvasView } from './CanvasView.tsx'
 import type { CanvasUploadedAsset } from './CanvasView.tsx'
@@ -78,11 +78,17 @@ interface CanvasSessionsLike {
 }
 
 /** Structural read face of the conversation service's input resolver, used to
- *  drop text into the agent composer input box without sending. */
+ *  drop a node into the agent composer input box — as a real image attachment
+ *  (thumbnail) for media, or as draft text for text/note nodes. */
 interface CanvasConversationLike {
   input?: {
-    for(actx: ClientContext): { setDraft(text: string): void }
+    for(actx: ClientContext): {
+      setDraft(text: string): void
+      addAttachments(ids: readonly string[]): boolean
+    }
   }
+  /** Register browser-owned draft attachments (image → thumbnail, other → file). */
+  createDrafts?(sessionId: SessionId, files: readonly File[]): readonly { id: string }[]
 }
 
 /** One Remote result, the wire shape the generated remote-client returns. */
@@ -172,6 +178,31 @@ function imageMediaTypeOf(fileName: string): string | undefined {
   const dot = fileName.lastIndexOf('.')
   const ext = dot === -1 ? '' : fileName.slice(dot).toLowerCase()
   return IMAGE_MIME[ext]
+}
+
+/** Human-readable kind caption (shared with CanvasView's KIND_LABEL). */
+const KIND_LABEL: Record<CanvasNode['kind'], string> = {
+  image: '图片',
+  video: '视频',
+  music: '音乐',
+  text: '文本',
+  note: '笔记',
+}
+
+/** A node's `url` is a `sha256:` attachment id. */
+function isSha(url: string | undefined): url is string {
+  return url !== undefined && url.startsWith('sha256:')
+}
+
+/** File extension for a stored image's verified media type (for the draft's name). */
+function extOf(mediaType: string): string {
+  switch (mediaType) {
+    case 'image/png': return 'png'
+    case 'image/jpeg': return 'jpg'
+    case 'image/webp': return 'webp'
+    case 'image/gif': return 'gif'
+    default: return 'png'
+  }
 }
 
 /** Read one File into a canonical base64 string (data-URL prefix stripped). */
@@ -293,15 +324,52 @@ function createCanvasFace(ctx: ClientContext) {
         const session = sessionOf()
         await session.prompt([{ type: 'text', text }], 'queue')
       },
-      addToInput: (text: string): void => {
-        // Drop text into the agent composer's input box (draft only, no send).
-        // Resolve the session's Agent scope, then the conversation input resolver.
+      addNodeToInput: async (node: CanvasNode): Promise<void> => {
+        // Put a node into the agent composer input box WITHOUT sending:
+        // - text/note → its content (or label) as draft text;
+        // - image    → a real image attachment (thumbnail), read back through
+        //              the canvas's own read channel and registered as a
+        //              browser draft attachment;
+        // - video/music → a `[类型] 标题` text reference (they are workspace
+        //              files, not prompt image blocks).
         const conversation = ctx.get('conversation') as CanvasConversationLike | undefined
         const actx = (ctx.get('sessions') as CanvasSessionsLike | undefined)?.scope(sessionId)
         if (conversation?.input === undefined || actx === undefined) {
           throw new Error('canvas: 当前环境不支持添加到输入框')
         }
-        conversation.input.for(actx).setDraft(text)
+        const input = conversation.input.for(actx)
+        const isImage = node.kind === 'image' && isSha(node.url) && node.meta !== undefined
+        if (isImage) {
+          const mediaType = typeof node.meta?.['mediaType'] === 'string' ? node.meta.mediaType : undefined
+          const bytes = typeof node.meta?.['bytes'] === 'number' ? node.meta.bytes : undefined
+          const width = typeof node.meta?.['width'] === 'number' ? node.meta.width : undefined
+          const height = typeof node.meta?.['height'] === 'number' ? node.meta.height : undefined
+          if (mediaType === undefined || bytes === undefined || width === undefined || height === undefined) {
+            input.setDraft(`[图片] ${node.label}`)
+            return
+          }
+          if (conversation.createDrafts === undefined) {
+            input.setDraft(`[图片] ${node.label}`)
+            return
+          }
+          const saved = unwrap(await remoteOf().readAsset(sessionId, {
+            attachmentId: node.url!,
+            mediaType, bytes, width, height,
+          }), 'readAsset')
+          const binary = atob(saved.dataBase64)
+          const raw = new Uint8Array(binary.length)
+          for (let i = 0; i < binary.length; i += 1) raw[i] = binary.charCodeAt(i)
+          const blob = new Blob([raw.buffer], { type: saved.mediaType })
+          const file = new File([blob], `${node.label}.${extOf(saved.mediaType)}`, { type: saved.mediaType })
+          const drafts = conversation.createDrafts(sessionId, [file])
+          if (drafts.length === 0) return
+          input.addAttachments(drafts.map((d) => d.id))
+          return
+        }
+        const text = node.kind === 'text' || node.kind === 'note'
+          ? (node.content ?? node.label)
+          : `[${KIND_LABEL[node.kind]}] ${node.label}`
+        input.setDraft(text)
       },
       addNode: async (request: CanvasAddNodeRequest): Promise<CanvasState> =>
         unwrap(await remoteOf().addNode(sessionId, request), 'addNode'),

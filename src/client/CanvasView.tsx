@@ -59,8 +59,9 @@ export interface CanvasWriteback {
 export interface CanvasViewInjected extends CanvasWriteback {
   loadImage: (ref: CanvasReadAssetRequest) => Promise<string>
   ask: (text: string) => Promise<void>
-  /** Put text into the agent composer's input box (without sending). */
-  addToInput: (text: string) => void
+  /** Put a node into the agent composer input box (image → thumbnail attachment,
+   *  text/note → draft text), without sending. */
+  addNodeToInput: (node: CanvasNode) => Promise<void>
   /** Open the native file picker (menu-bar upload). */
   pickFiles: (kind?: 'image' | 'video' | 'music') => Promise<File[]>
   /** Store the given files (image → attachment, video/audio → workspace) and
@@ -99,8 +100,8 @@ export interface CanvasViewProps {
   loadImage: CanvasViewInjected['loadImage']
   /** Injected one-shot agent prompt (ask about a selected node). */
   ask: CanvasViewInjected['ask']
-  /** Injected composer-draft injection (put text into the agent input box). */
-  addToInput: CanvasViewInjected['addToInput']
+  /** Injected composer-node injection (image → attachment, text/note → draft). */
+  addNodeToInput: CanvasViewInjected['addNodeToInput']
   /** Injected file picker (menu-bar upload). */
   pickFiles: CanvasViewInjected['pickFiles']
   /** Injected file store (image → attachment, video/audio → workspace). */
@@ -406,7 +407,7 @@ interface SelectedNode {
   content?: string
 }
 
-export function CanvasView({ useProjection, loadImage, ask, addToInput, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps) {
+export function CanvasView({ useProjection, loadImage, ask, addNodeToInput, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps) {
   const canvas = useProjection('canvas')
 
   // Local, RESPONSIVE flow state: the projection is the authoritative mirror,
@@ -781,21 +782,16 @@ export function CanvasView({ useProjection, loadImage, ask, addToInput, pickFile
     setNodeMenu(null)
   }
 
-  // Put a node into the agent composer's input box (without sending): text/note
-  // contribute their content, media nodes contribute a `[类型] 标题` reference.
-  const addNodeToInput = (nodeId: string): void => {
+  // Put a node into the agent composer input box (image → thumbnail attachment,
+  // text/note → draft text; media → `[类型] 标题`), without sending.
+  const handleAddToInput = (nodeId: string): void => {
     const node: CanvasNode | undefined = canvas?.nodes.find((n: CanvasNode) => n.id === nodeId)
     if (node === undefined) return
-    const text = node.kind === 'text' || node.kind === 'note'
-      ? (node.content ?? node.label)
-      : `[${KIND_LABEL[node.kind]}] ${node.label}`
-    try {
-      addToInput(text)
-    } catch (error) {
+    setNodeMenu(null)
+    void addNodeToInput(node).catch((error: unknown) => {
       const msg = error instanceof Error ? error.message : String(error)
       setWritebackError(`添加到输入框失败: ${msg}`)
-    }
-    setNodeMenu(null)
+    })
   }
 
   return (
@@ -896,9 +892,9 @@ export function CanvasView({ useProjection, loadImage, ask, addToInput, pickFile
 
           {nodeMenu !== null && (
             <div className="ldd-canvas-menu ldd-canvas-node-menu" style={{ left: nodeMenu.x, top: nodeMenu.y }}>
-              <button type="button" onClick={() => { void deleteNodeById(nodeMenu.nodeId) }}>删除</button>
+              <button type="button" onClick={() => { deleteNodeById(nodeMenu.nodeId) }}>删除</button>
               <button type="button" onClick={() => { duplicateNode(nodeMenu.nodeId) }}>复制</button>
-              <button type="button" onClick={() => { addNodeToInput(nodeMenu.nodeId) }}>添加至输入框</button>
+              <button type="button" onClick={() => { handleAddToInput(nodeMenu.nodeId) }}>添加至输入框</button>
             </div>
           )}
 
