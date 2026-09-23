@@ -192,28 +192,40 @@ function generatedImagesOf(event: SessionEvent): GeneratedImageMeta[] {
   return metas
 }
 
-/** Pull every image attachment id out of one `user/message` event's `content`
- *  (the prompt's image blocks — the reference images an image-to-image call was
- *  fed, read from the composer's attachment rail). These are content-addressed
- *  (`sha256:…`), identical to the source canvas node's `url`. */
-function referenceImageIdsOf(event: SessionEvent): string[] {
-  const data = event.data as { readonly content?: unknown }
-  const ids: string[] = []
-  if (!Array.isArray(data.content)) return ids
-  for (const block of data.content) {
-    if (typeof block !== 'object' || block === null) continue
-    const image = block as { readonly type?: unknown; readonly attachment?: { readonly attachmentId?: unknown } }
-    if (image.type !== 'image') continue
-    if (typeof image.attachment?.attachmentId === 'string') ids.push(image.attachment.attachmentId)
-  }
-  return ids
+/** Whether a `user/message` is a REAL user submission — not a system-prompt
+ *  snapshot or skill-catalog injection, which also ride `user/message` but carry
+ *  `source.kind` 'plugin' / 'skill-catalog' and no image blocks. */
+function isRealUserMessage(event: SessionEvent): boolean {
+  const data = event.data as { readonly source?: { readonly kind?: unknown } }
+  return data.source?.kind === 'user'
 }
 
-/** Reference-image ids of the CURRENT turn, keyed by the owning Session object.
- *  Cleared on `turn/start`, accumulated from `user/message` image blocks, and
- *  read when a generated image lands — so an image-to-image result wires itself
- *  to the canvas node whose `url` matches a prompt reference. */
-const currentTurnReferenceImages = new WeakMap<object, Set<string>>()
+/** Pull every image attachment out of one real `user/message` (the prompt's
+ *  reference images, sent from the composer's attachment rail). Content-addressed
+ *  (`sha256:…`), identical to the source canvas node's `url`. */
+function userImageBlocksOf(event: SessionEvent): GeneratedImageMeta[] {
+  const data = event.data as { readonly content?: unknown }
+  const blocks: GeneratedImageMeta[] = []
+  if (!Array.isArray(data.content)) return blocks
+  for (const block of data.content) {
+    if (typeof block !== 'object' || block === null) continue
+    const image = block as { readonly type?: unknown; readonly attachment?: unknown }
+    if (image.type !== 'image' || typeof image.attachment !== 'object' || image.attachment === null) continue
+    const ref = image.attachment as GeneratedImageMeta
+    if (typeof ref.attachmentId === 'string') blocks.push(ref)
+  }
+  return blocks
+}
+
+/** Per-turn state keyed by the owning Session: the turn's reference-image ids
+ *  (accumulated from the real user message) and the pending blank-node ids
+ *  awaiting a generated image. Cleared on `turn/start`. */
+interface TurnState {
+  refIds: Set<string>
+  pendingNodeIds: string[]
+}
+
+const turnStates = new WeakMap<object, TurnState>()
 
 /** Serialize one canvas for the model-facing inspect result. */
 function describeCanvas(state: CanvasState): string {
@@ -416,30 +428,76 @@ export function apply(ctx: Context): void {
   const disposers = defineCanvasTools().map((tool) => ctx.tools.register(tool))
   ctx.effect(() => () => { for (const dispose of disposers) dispose() }, 'ldd-canvas: dispose tools')
 
-  // Auto-mirror generated images onto the canvas: generate_image renders its
-  // results as `image` blocks INSIDE a `tool/result` event (the tool-result
-  // block nests the image attachment under `data.message.content`). The
-  // `assistant/message` that closes the turn only carries text/tool-call, so
-  // watching only assistant settlements missed every generated picture. Watch
-  // both `tool/result` (where generate_image lands) and `assistant/message`
-  // (in case an image is ever surfaced there directly), and add each image the
-  // canvas doesn't already carry as an image node (auto grid layout) with its
-  // full durable reference written into the node meta.
+  // Auto-mirror onto the canvas. Three event kinds drive it:
+  //  - `turn/start`        → reset the turn's reference/pending state;
+  //  - `user/message`      → a real submission: mirror any not-yet-on-canvas
+  //                           image (external upload) as a node, and for each
+  //                           reference-image source node create a BLANK
+  //                           downstream placeholder + edge (the "chain" the
+  //                           result will land on);
+  //  - `tool/result` / `assistant/message` → a generated image lands: fill the
+  //                           oldest pending placeholder (turning its dashed
+  //                           chain into the real image), else add a fresh node
+  //                           wired to the source (or detached, for text-only).
   ctx.on('session/event', (session, event) => {
-    // Track the turn's reference images: cleared at each turn boundary, then
-    // accumulated from the user message's image blocks. This lets an
-    // image-to-image generation wire its result to the source canvas node.
     if (event.type === 'turn/start') {
-      currentTurnReferenceImages.set(session, new Set())
+      turnStates.set(session, { refIds: new Set(), pendingNodeIds: [] })
       return
     }
     if (event.type === 'user/message') {
-      const ids = referenceImageIdsOf(event)
-      if (ids.length > 0) {
-        const set = currentTurnReferenceImages.get(session) ?? new Set<string>()
-        for (const id of ids) set.add(id)
-        currentTurnReferenceImages.set(session, set)
-      }
+      if (!isRealUserMessage(event)) return
+      const blocks = userImageBlocksOf(event)
+      if (blocks.length === 0) return
+      const state = turnStates.get(session) ?? { refIds: new Set<string>(), pendingNodeIds: [] }
+      turnStates.set(session, state)
+      // Defer out of the triggering append (see the tool/result comment below).
+      queueMicrotask(() => {
+        try {
+          let before = foldCanvas(session.snapshotEvents())
+          let next = before
+          // 1) Mirror every reference image that is not yet on the canvas (an
+          //    image uploaded from outside the canvas still lands here).
+          for (const block of blocks) {
+            state.refIds.add(block.attachmentId)
+            if (next.nodes.some((node) => node.url === block.attachmentId)) continue
+            const auto = next.nodes.length
+            const result = addNode(next, {
+              kind: 'image',
+              label: block.name ?? '图片',
+              x: (auto % 4) * 220,
+              y: Math.floor(auto / 4) * 180,
+              url: block.attachmentId,
+              meta: {
+                ...(block.width === undefined ? {} : { width: block.width }),
+                ...(block.height === undefined ? {} : { height: block.height }),
+                ...(block.mediaType === undefined ? {} : { mediaType: block.mediaType }),
+                ...(block.bytes === undefined ? {} : { bytes: block.bytes }),
+              },
+            })
+            next = result.state
+          }
+          // 2) For each reference-image source node, hang a BLANK downstream
+          //    placeholder and wire it — the slot the generated image will fill.
+          for (const block of blocks) {
+            const source = next.nodes.find((node) => node.url === block.attachmentId)
+            if (source === undefined) continue
+            const pending = addNode(next, {
+              kind: 'image',
+              label: '生成中…',
+              x: source.x + 340,
+              y: source.y,
+              meta: { pending: true },
+            })
+            next = pending.state
+            const edgeResult = addEdge(next, { source: source.id, target: pending.node.id })
+            next = edgeResult.state
+            state.pendingNodeIds.push(pending.node.id)
+          }
+          if (next.nodes.length !== before.nodes.length) session.append('canvas/state', { state: next })
+        } catch (error) {
+          console.error('[ldd-canvas] auto-mirror (user/message) failed:', error)
+        }
+      })
       return
     }
     if (event.type !== 'assistant/message' && event.type !== 'tool/result') return
@@ -457,16 +515,33 @@ export function apply(ctx: Context): void {
     queueMicrotask(() => {
       try {
         const before = foldCanvas(session.snapshotEvents())
-        const refSet = currentTurnReferenceImages.get(session)
+        const state = turnStates.get(session)
         let next = before
         for (const meta of metas) {
           if (next.nodes.some((node) => node.url === meta.attachmentId)) continue
-          // If this generated image was produced from a prompt reference that
-          // matches a canvas node's url, it becomes that node's DOWNSTREAM:
-          // placed to its right and wired with an edge (the reference-image
-          // chain), instead of a detached auto-grid node.
-          const source = refSet !== undefined && refSet.size > 0
-            ? next.nodes.find((node) => node.url !== undefined && refSet.has(node.url))
+          // Preferred: fill the oldest pending placeholder (its dashed chain
+          // turns into the real image in place).
+          const pendingId = state?.pendingNodeIds.shift()
+          const pending = pendingId !== undefined
+            ? next.nodes.find((node) => node.id === pendingId && node.meta?.pending === true)
+            : undefined
+          if (pending !== undefined) {
+            next = updateNode(next, pending.id, {
+              label: meta.name ?? '生成图片',
+              url: meta.attachmentId,
+              meta: {
+                ...(meta.width === undefined ? {} : { width: meta.width }),
+                ...(meta.height === undefined ? {} : { height: meta.height }),
+                ...(meta.mediaType === undefined ? {} : { mediaType: meta.mediaType }),
+                ...(meta.bytes === undefined ? {} : { bytes: meta.bytes }),
+              },
+            })
+            continue
+          }
+          // Fallback: wire to the reference-image source node (image-to-image
+          // without a pre-created placeholder), or a detached auto-grid node.
+          const source = state !== undefined && state.refIds.size > 0
+            ? next.nodes.find((node) => node.url !== undefined && state.refIds.has(node.url))
             : undefined
           const auto = next.nodes.length
           const result = addNode(next, {
@@ -488,7 +563,9 @@ export function apply(ctx: Context): void {
             next = edgeResult.state
           }
         }
-        if (next.nodes.length !== before.nodes.length) session.append('canvas/state', { state: next })
+        if (next.nodes.length !== before.nodes.length || next.edges.length !== before.edges.length) {
+          session.append('canvas/state', { state: next })
+        }
       } catch (error) {
         // The session may have been disposed before the microtask ran; a failed
         // mirror must never take the session down.
