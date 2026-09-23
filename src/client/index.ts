@@ -321,6 +321,18 @@ function createCanvasFace(ctx: ClientContext) {
     }
     return resolveImagePickerModels(snapshot.value)
   }
+  // Fold external model switches (the conversation composer's picker issues the
+  // same `/generate-model` command and broadcasts this event) into the canvas
+  // dropdown's override mirror, so the two pickers stay in sync.
+  ctx.effect(() => {
+    const handler = (event: Event): void => {
+      const detail = (event as CustomEvent<{ sessionId: string; kind: string; key: string }>).detail
+      if (detail === undefined || typeof detail.sessionId !== 'string') return
+      if (detail.kind === 'image') imageOverrides.set(detail.sessionId, detail.key)
+    }
+    window.addEventListener('dsh:generate-model-changed', handler)
+    return () => window.removeEventListener('dsh:generate-model-changed', handler)
+  }, 'canvas: generate-model sync')
   return (sessionId: SessionId) => {
     const sessionOf = (): CanvasSessionLike => {
       // Resolve lazily per call so a view mounted before the session bound
@@ -477,6 +489,11 @@ function createCanvasFace(ctx: ClientContext) {
         },
         select: (key: string): void => {
           imageOverrides.set(String(sessionId), key)
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('dsh:generate-model-changed', {
+              detail: { sessionId: String(sessionId), kind: 'image', key },
+            }))
+          }
           void sessionOf().command(`/generate-model image ${key}`).catch(() => {})
         },
       },
