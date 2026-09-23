@@ -469,6 +469,17 @@
   background: var(--dsw-alias-bg-layer-2);
 }
 
+/* Right-click node context menu reuses the floating menu geometry. */
+.ldd-canvas-node-menu {
+  min-width: 148px;
+}
+
+/* Left-drag on empty canvas box-selects (right-drag pans). Show the normal
+   arrow over the pane instead of React Flow's link-pointer `selection` cursor. */
+.react-flow__pane.selection {
+  cursor: default;
+}
+
 /* ---- drag-to-create ghost target (dashed ＋ marker at the release point) ---- */
 .ldd-canvas-draft-target {
   width: 36px;

@@ -22,7 +22,7 @@
  * with local feedback; the projection's refresh is the authoritative reconcile.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import type { DragEvent as ReactDragEvent, ReactNode } from 'react'
+import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import {
   Background,
   Controls,
@@ -30,6 +30,7 @@ import {
   MiniMap,
   Position,
   ReactFlow,
+  SelectionMode,
   applyEdgeChanges,
   applyNodeChanges,
 } from '@xyflow/react'
@@ -58,6 +59,8 @@ export interface CanvasWriteback {
 export interface CanvasViewInjected extends CanvasWriteback {
   loadImage: (ref: CanvasReadAssetRequest) => Promise<string>
   ask: (text: string) => Promise<void>
+  /** Put text into the agent composer's input box (without sending). */
+  addToInput: (text: string) => void
   /** Open the native file picker (menu-bar upload). */
   pickFiles: (kind?: 'image' | 'video' | 'music') => Promise<File[]>
   /** Store the given files (image → attachment, video/audio → workspace) and
@@ -96,6 +99,8 @@ export interface CanvasViewProps {
   loadImage: CanvasViewInjected['loadImage']
   /** Injected one-shot agent prompt (ask about a selected node). */
   ask: CanvasViewInjected['ask']
+  /** Injected composer-draft injection (put text into the agent input box). */
+  addToInput: CanvasViewInjected['addToInput']
   /** Injected file picker (menu-bar upload). */
   pickFiles: CanvasViewInjected['pickFiles']
   /** Injected file store (image → attachment, video/audio → workspace). */
@@ -307,7 +312,7 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
       {data.kind === 'image' && (
         src !== null
           ? <img className="ldd-canvas-node-image" src={src} alt={data.label} style={{ width: displayW, height: displayH }} />
-          : <div className="ldd-canvas-node-image ldd-canvas-image-placeholder" style={{ width: displayW, height: displayH }}>{kindIcon('image')}图片</div>
+          : <div className="ldd-canvas-node-image ldd-canvas-image-placeholder" style={{ width: 240, height: 180 }}>{kindIcon('image')}图片</div>
       )}
 
       {data.kind === 'video' && (
@@ -401,7 +406,7 @@ interface SelectedNode {
   content?: string
 }
 
-export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps) {
+export function CanvasView({ useProjection, loadImage, ask, addToInput, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps) {
   const canvas = useProjection('canvas')
 
   // Local, RESPONSIVE flow state: the projection is the authoritative mirror,
@@ -429,6 +434,8 @@ export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFil
   const lastPaneClick = useRef<{ time: number; x: number; y: number } | null>(null)
   // The node a dragged connection left from (set onConnectStart, read+cleared onConnectEnd).
   const connectSourceRef = useRef<string | null>(null)
+  // Right-click node context menu (删除 / 复制 / 添加至输入框), in screen px.
+  const [nodeMenu, setNodeMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null)
 
   // Reconcile local flow state from the projection (authoritative) on every change.
   useEffect(() => {
@@ -557,6 +564,7 @@ export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFil
   const onPaneClick = (event: { clientX: number; clientY: number }): void => {
     setSelected(null)
     setQuestion('')
+    setNodeMenu(null)
     const now = Date.now()
     const last = lastPaneClick.current
     const near = last !== null && now - last.time < 350
@@ -737,6 +745,59 @@ export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFil
     },
   }), [removeNode, run])
 
+  // Right-click a node → context menu (删除 / 复制 / 添加至输入框). The browser's
+  // native context menu is suppressed so our menu owns the right-click.
+  const onNodeContextMenu = useCallback((event: ReactMouseEvent, node: Node): void => {
+    event.preventDefault()
+    setSelected(null)
+    setMenu(null)
+    setNodeMenu({ x: event.clientX, y: event.clientY, nodeId: node.id })
+  }, [])
+
+  // Delete a node from the context menu (same write-back as the × button).
+  const deleteNodeById = (nodeId: string): void => {
+    run('removeNode', removeNode(nodeId))
+    setSelected((sel) => (sel !== null && sel.id === nodeId ? null : sel))
+    setNodeMenu(null)
+  }
+
+  // Duplicate a node: same kind/label/media/content, new id, offset position.
+  const duplicateNode = (nodeId: string): void => {
+    const node: CanvasNode | undefined = canvas?.nodes.find((n: CanvasNode) => n.id === nodeId)
+    if (node === undefined) return
+    const id = newId()
+    try {
+      void addNode({
+        id, kind: node.kind, label: `${node.label} 副本`,
+        x: node.x + 40, y: node.y + 40,
+        ...(node.content === undefined ? {} : { content: node.content }),
+        ...(node.url === undefined ? {} : { url: node.url }),
+        ...(node.meta === undefined ? {} : { meta: node.meta }),
+      }).then(() => setWritebackError(null))
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      setWritebackError(`复制失败: ${msg}`)
+    }
+    setNodeMenu(null)
+  }
+
+  // Put a node into the agent composer's input box (without sending): text/note
+  // contribute their content, media nodes contribute a `[类型] 标题` reference.
+  const addNodeToInput = (nodeId: string): void => {
+    const node: CanvasNode | undefined = canvas?.nodes.find((n: CanvasNode) => n.id === nodeId)
+    if (node === undefined) return
+    const text = node.kind === 'text' || node.kind === 'note'
+      ? (node.content ?? node.label)
+      : `[${KIND_LABEL[node.kind]}] ${node.label}`
+    try {
+      addToInput(text)
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      setWritebackError(`添加到输入框失败: ${msg}`)
+    }
+    setNodeMenu(null)
+  }
+
   return (
     <LoadImageContext.Provider value={loadImage}>
       <CanvasActionsContext.Provider value={actions}>
@@ -758,8 +819,13 @@ export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFil
             onConnect={onConnect}
             onConnectStart={onConnectStart}
             onConnectEnd={onConnectEnd}
-            // Left/middle/right all pan the empty canvas (right-drag = pan).
-            panOnDrag={[0, 1, 2]}
+            onNodeContextMenu={onNodeContextMenu}
+            // Right-button drag pans the canvas; left-button drag on empty canvas
+            // box-selects (normal pointer, not the grab hand), and left-dragging a
+            // selected node moves the whole selection.
+            panOnDrag={[2]}
+            selectionOnDrag
+            selectionMode={SelectionMode.Full}
             onNodeClick={(_, node) => {
               const data = node.data as unknown as CanvasNodeData
               setSelected({
@@ -770,6 +836,7 @@ export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFil
               })
               setQuestion('')
               setMenu(null)
+              setNodeMenu(null)
             }}
             onPaneClick={onPaneClick}
             fitView
@@ -824,6 +891,14 @@ export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFil
                     <button type="button" onClick={() => { void addDownstream('video') }}>视频</button>
                   </>
                 )}
+            </div>
+          )}
+
+          {nodeMenu !== null && (
+            <div className="ldd-canvas-menu ldd-canvas-node-menu" style={{ left: nodeMenu.x, top: nodeMenu.y }}>
+              <button type="button" onClick={() => { void deleteNodeById(nodeMenu.nodeId) }}>删除</button>
+              <button type="button" onClick={() => { duplicateNode(nodeMenu.nodeId) }}>复制</button>
+              <button type="button" onClick={() => { addNodeToInput(nodeMenu.nodeId) }}>添加至输入框</button>
             </div>
           )}
 

@@ -70,9 +70,19 @@ interface CanvasSessionLike {
   prompt(content: readonly { readonly type: 'text'; readonly text: string }[], mode: 'queue' | 'steer'): Promise<unknown>
 }
 
-/** Structural read face of the runtime sessions service (binding lookup). */
+/** Structural read face of the runtime sessions service (binding + scope lookup). */
 interface CanvasSessionsLike {
   binding(id: SessionId): { session?: CanvasSessionLike } | undefined
+  /** Resolve the session's Agent-scoped context (for composer-input injection). */
+  scope(id: SessionId): ClientContext | undefined
+}
+
+/** Structural read face of the conversation service's input resolver, used to
+ *  drop text into the agent composer input box without sending. */
+interface CanvasConversationLike {
+  input?: {
+    for(actx: ClientContext): { setDraft(text: string): void }
+  }
 }
 
 /** One Remote result, the wire shape the generated remote-client returns. */
@@ -282,6 +292,16 @@ function createCanvasFace(ctx: ClientContext) {
       ask: async (text: string): Promise<void> => {
         const session = sessionOf()
         await session.prompt([{ type: 'text', text }], 'queue')
+      },
+      addToInput: (text: string): void => {
+        // Drop text into the agent composer's input box (draft only, no send).
+        // Resolve the session's Agent scope, then the conversation input resolver.
+        const conversation = ctx.get('conversation') as CanvasConversationLike | undefined
+        const actx = (ctx.get('sessions') as CanvasSessionsLike | undefined)?.scope(sessionId)
+        if (conversation?.input === undefined || actx === undefined) {
+          throw new Error('canvas: 当前环境不支持添加到输入框')
+        }
+        conversation.input.for(actx).setDraft(text)
       },
       addNode: async (request: CanvasAddNodeRequest): Promise<CanvasState> =>
         unwrap(await remoteOf().addNode(sessionId, request), 'addNode'),
