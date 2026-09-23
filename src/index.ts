@@ -192,6 +192,29 @@ function generatedImagesOf(event: SessionEvent): GeneratedImageMeta[] {
   return metas
 }
 
+/** Pull every image attachment id out of one `user/message` event's `content`
+ *  (the prompt's image blocks — the reference images an image-to-image call was
+ *  fed, read from the composer's attachment rail). These are content-addressed
+ *  (`sha256:…`), identical to the source canvas node's `url`. */
+function referenceImageIdsOf(event: SessionEvent): string[] {
+  const data = event.data as { readonly content?: unknown }
+  const ids: string[] = []
+  if (!Array.isArray(data.content)) return ids
+  for (const block of data.content) {
+    if (typeof block !== 'object' || block === null) continue
+    const image = block as { readonly type?: unknown; readonly attachment?: { readonly attachmentId?: unknown } }
+    if (image.type !== 'image') continue
+    if (typeof image.attachment?.attachmentId === 'string') ids.push(image.attachment.attachmentId)
+  }
+  return ids
+}
+
+/** Reference-image ids of the CURRENT turn, keyed by the owning Session object.
+ *  Cleared on `turn/start`, accumulated from `user/message` image blocks, and
+ *  read when a generated image lands — so an image-to-image result wires itself
+ *  to the canvas node whose `url` matches a prompt reference. */
+const currentTurnReferenceImages = new WeakMap<object, Set<string>>()
+
 /** Serialize one canvas for the model-facing inspect result. */
 function describeCanvas(state: CanvasState): string {
   if (state.nodes.length === 0) return '画布当前为空。'
@@ -403,6 +426,22 @@ export function apply(ctx: Context): void {
   // canvas doesn't already carry as an image node (auto grid layout) with its
   // full durable reference written into the node meta.
   ctx.on('session/event', (session, event) => {
+    // Track the turn's reference images: cleared at each turn boundary, then
+    // accumulated from the user message's image blocks. This lets an
+    // image-to-image generation wire its result to the source canvas node.
+    if (event.type === 'turn/start') {
+      currentTurnReferenceImages.set(session, new Set())
+      return
+    }
+    if (event.type === 'user/message') {
+      const ids = referenceImageIdsOf(event)
+      if (ids.length > 0) {
+        const set = currentTurnReferenceImages.get(session) ?? new Set<string>()
+        for (const id of ids) set.add(id)
+        currentTurnReferenceImages.set(session, set)
+      }
+      return
+    }
     if (event.type !== 'assistant/message' && event.type !== 'tool/result') return
     const metas = generatedImagesOf(event)
     if (metas.length === 0) return
@@ -418,15 +457,23 @@ export function apply(ctx: Context): void {
     queueMicrotask(() => {
       try {
         const before = foldCanvas(session.snapshotEvents())
+        const refSet = currentTurnReferenceImages.get(session)
         let next = before
         for (const meta of metas) {
           if (next.nodes.some((node) => node.url === meta.attachmentId)) continue
+          // If this generated image was produced from a prompt reference that
+          // matches a canvas node's url, it becomes that node's DOWNSTREAM:
+          // placed to its right and wired with an edge (the reference-image
+          // chain), instead of a detached auto-grid node.
+          const source = refSet !== undefined && refSet.size > 0
+            ? next.nodes.find((node) => node.url !== undefined && refSet.has(node.url))
+            : undefined
           const auto = next.nodes.length
           const result = addNode(next, {
             kind: 'image',
             label: meta.name ?? '生成图片',
-            x: (auto % 4) * 220,
-            y: Math.floor(auto / 4) * 180,
+            x: source !== undefined ? source.x + 340 : (auto % 4) * 220,
+            y: source !== undefined ? source.y : Math.floor(auto / 4) * 180,
             url: meta.attachmentId,
             meta: {
               ...(meta.width === undefined ? {} : { width: meta.width }),
@@ -436,6 +483,10 @@ export function apply(ctx: Context): void {
             },
           })
           next = result.state
+          if (source !== undefined) {
+            const edgeResult = addEdge(next, { source: source.id, target: result.node.id })
+            next = edgeResult.state
+          }
         }
         if (next.nodes.length !== before.nodes.length) session.append('canvas/state', { state: next })
       } catch (error) {
