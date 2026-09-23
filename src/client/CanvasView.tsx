@@ -355,6 +355,10 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
 function DraftTargetNode() {
   return (
     <div className="ldd-canvas-draft-target">
+      {/* The ghost needs a target Handle so the dashed ghost edge has a real
+          endpoint to anchor to: React Flow's getEdgePosition returns null (and
+          silently drops the edge) when the target node has no handle bounds. */}
+      <Handle type="target" position={Position.Left} className="ldd-canvas-draft-handle" />
       <span className="ldd-canvas-draft-plus">＋</span>
     </div>
   )
@@ -449,6 +453,11 @@ export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFil
       draggable: false,
       selectable: false,
       connectable: false,
+      // Fixed size so React Flow can initialize the node (and its handle
+      // bounds) without waiting on a ResizeObserver tick — the dashed edge
+      // then anchors immediately.
+      width: 36,
+      height: 36,
     }
     return [...flowNodes, ghost]
   }, [flowNodes, menu])
@@ -460,7 +469,8 @@ export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFil
       source: menu.sourceNodeId,
       target: GHOST_NODE_ID,
       type: 'default',
-      animated: true,
+      // Dashed line (no `animated` — its CSS animation would fight the static
+      // stroke-dasharray); it turns solid once the real node+edge are written.
       style: { strokeDasharray: '6 6' },
     }
     return [...flowEdges, dashed]

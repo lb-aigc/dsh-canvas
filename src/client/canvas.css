@@ -493,6 +493,13 @@
   box-sizing: border-box;
 }
 
+/* The ghost node's handle is a pure anchor for the dashed edge — hide the dot
+   itself (opacity only, so React Flow still measures its handle bounds). */
+.ldd-canvas-draft-handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* ---- edit bar (a selected node → rename / content / delete / ask) ---- */
 .ldd-canvas-edit {
   position: absolute;
