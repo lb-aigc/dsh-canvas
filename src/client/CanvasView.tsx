@@ -285,8 +285,16 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
     <div className="ldd-canvas-node" data-kind={data.kind}>
       {/* Handles give React Flow endpoints for edges; connectable so the user can
           drag a link between nodes (persisted via the `link` verb). */}
-      <Handle type="target" position={Position.Left} className="ldd-canvas-handle" />
-      <Handle type="source" position={Position.Right} className="ldd-canvas-handle" />
+      <Handle type="target" position={Position.Left} className="ldd-canvas-handle">
+        <svg className="ldd-canvas-handle-plus" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M8 3.5v9M3.5 8h9" />
+        </svg>
+      </Handle>
+      <Handle type="source" position={Position.Right} className="ldd-canvas-handle">
+        <svg className="ldd-canvas-handle-plus" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M8 3.5v9M3.5 8h9" />
+        </svg>
+      </Handle>
 
       <button
         type="button"
@@ -617,6 +625,27 @@ export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFil
     setMenu(null)
   }
 
+  // Drag-to-create downstream: a connection dragged from a node's source handle
+  // and released on empty canvas opens the menu; picking 图片/视频 creates a
+  // BLANK downstream node (no upload) and wires it to the source with a solid
+  // edge — the ComfyUI-style "chain a next step" flow.
+  const addDownstream = async (kind: 'image' | 'video'): Promise<void> => {
+    if (menu === null || menu.sourceNodeId === undefined) return
+    const { flowX, flowY, sourceNodeId } = menu
+    const id = newId()
+    const label = kind === 'image' ? '图片' : '视频'
+    try {
+      await addNode({ id, kind, label, x: flowX, y: flowY })
+      await link({ source: sourceNodeId, target: id })
+      setWritebackError(null)
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      console.error('[ldd-canvas] add downstream failed:', error)
+      setWritebackError(`创建节点失败: ${msg}`)
+    }
+    setMenu(null)
+  }
+
   // Drag-and-drop upload: files dropped on the canvas become cards at the drop
   // spot (images store + render; video/audio write to the workspace).
   const onCanvasDrop = async (event: ReactDragEvent<HTMLDivElement>): Promise<void> => {
@@ -772,9 +801,20 @@ export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFil
 
           {menu !== null && (
             <div className="ldd-canvas-menu" style={{ left: menu.x, top: menu.y }}>
-              <button type="button" onClick={() => { void uploadAssets('image') }}>上传图片</button>
-              <button type="button" onClick={() => { void uploadAssets('music') }}>上传音频</button>
-              <button type="button" onClick={() => { void uploadAssets('video') }}>上传视频</button>
+              {menu.sourceNodeId === undefined
+                ? (
+                  <>
+                    <button type="button" onClick={() => { void uploadAssets('image') }}>上传图片</button>
+                    <button type="button" onClick={() => { void uploadAssets('music') }}>上传音频</button>
+                    <button type="button" onClick={() => { void uploadAssets('video') }}>上传视频</button>
+                  </>
+                )
+                : (
+                  <>
+                    <button type="button" onClick={() => { void addDownstream('image') }}>图片</button>
+                    <button type="button" onClick={() => { void addDownstream('video') }}>视频</button>
+                  </>
+                )}
             </div>
           )}
 
