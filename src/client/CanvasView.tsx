@@ -66,6 +66,21 @@ export interface CanvasComposer {
   submit(): void
 }
 
+/** One selectable generation model in the canvas composer's dropdown. */
+export interface CanvasModelOption {
+  key: string
+  label: string
+  selected: boolean
+}
+
+/** Generation-model switch face (drives the `/generate-model` slash command). */
+export interface CanvasModels {
+  /** The configured image models for the current session's dropdown. */
+  list(): CanvasModelOption[]
+  /** Temporarily switch this session's image model (does not change the default). */
+  select(key: string): void
+}
+
 /** Injected per-session canvas face: image loader + one-shot agent prompt + write-back. */
 export interface CanvasViewInjected extends CanvasWriteback {
   loadImage: (ref: CanvasReadAssetRequest) => Promise<string>
@@ -73,6 +88,10 @@ export interface CanvasViewInjected extends CanvasWriteback {
   /** Put a node into the agent composer input box (image → thumbnail attachment,
    *  text/note → draft text), without sending. */
   addNodeToInput: (node: CanvasNode) => Promise<void>
+  /** Copy a node to the SYSTEM clipboard (image → bitmap, text/note → text). */
+  copyNodeToClipboard: (node: CanvasNode) => Promise<void>
+  /** Generation-model switch for the canvas composer's dropdown. */
+  models: CanvasModels
   /** The canvas's own composer input (drives the real conversation composer). */
   compose: CanvasComposer
   /** Open the native file picker (menu-bar upload). */
@@ -115,6 +134,10 @@ export interface CanvasViewProps {
   ask: CanvasViewInjected['ask']
   /** Injected composer-node injection (image → attachment, text/note → draft). */
   addNodeToInput: CanvasViewInjected['addNodeToInput']
+  /** Injected clipboard copy (image → bitmap, text/note → text). */
+  copyNodeToClipboard: CanvasViewInjected['copyNodeToClipboard']
+  /** Injected generation-model switch. */
+  models: CanvasViewInjected['models']
   /** Injected canvas composer (drives the real conversation composer). */
   compose: CanvasViewInjected['compose']
   /** Injected file picker (menu-bar upload). */
@@ -414,15 +437,7 @@ function toFlowEdges(state: CanvasState): Edge[] {
   }))
 }
 
-/** A node the user has selected for editing / asking. */
-interface SelectedNode {
-  id: string
-  label: string
-  kind: CanvasNode['kind']
-  content?: string
-}
-
-export function CanvasView({ useProjection, loadImage, addNodeToInput, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps) {
+export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeToClipboard, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps) {
   const canvas = useProjection('canvas')
 
   // Local, RESPONSIVE flow state: the projection is the authoritative mirror,
@@ -431,13 +446,15 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, compose, 
   const [flowNodes, setFlowNodes] = useState<Node[]>([])
   const [flowEdges, setFlowEdges] = useState<Edge[]>([])
 
-  const [selected, setSelected] = useState<SelectedNode | null>(null)
-  const [draftLabel, setDraftLabel] = useState('')
-  const [draftContent, setDraftContent] = useState('')
   // The canvas's own agent composer: draft text + pending image attachments,
   // flushed into the real conversation composer on send.
   const [composeText, setComposeText] = useState('')
   const [composeFiles, setComposeFiles] = useState<File[]>([])
+  // The selected generation model key for the composer dropdown (re-read from
+  // the face on open; this holds the picked value for the controlled <select>).
+  const [modelOptions, setModelOptions] = useState<CanvasModelOption[]>([])
+  const [selectedModel, setSelectedModel] = useState<string>('')
+  const [modelsOpen, setModelsOpen] = useState(false)
   // Last write-back failure, surfaced in a dismissible banner (the user has no
   // DevTools, so console-only errors were invisible). Cleared on any success.
   const [writebackError, setWritebackError] = useState<string | null>(null)
@@ -566,14 +583,6 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, compose, 
     return [...flowEdges, dashed]
   }, [flowEdges, menu])
 
-  // Seed the edit drafts when a node is selected.
-  useEffect(() => {
-    if (selected !== null) {
-      setDraftLabel(selected.label)
-      setDraftContent(selected.content ?? '')
-    }
-  }, [selected])
-
   // Fire-and-forget write-back: log (not throw) so a transient failure never
   // takes the React tree down; the projection refresh is the reconcile.
   const run = useCallback((op: string, p: Promise<unknown>) => {
@@ -636,7 +645,6 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, compose, 
       : { x: event.touches[0]?.clientX ?? event.changedTouches[0]?.clientX ?? 0, y: event.touches[0]?.clientY ?? event.changedTouches[0]?.clientY ?? 0 }
     const flow = rfRef.current?.screenToFlowPosition({ x: point.x, y: point.y })
     if (flow === undefined) return
-    setSelected(null)
     setMenu({ x: point.x, y: point.y, flowX: flow.x, flowY: flow.y, sourceNodeId: source })
   }, [])
 
@@ -644,7 +652,6 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, compose, 
   // click just clears selection (and closes the menu). The viewport coordinate
   // maps through the React Flow instance so the node lands under the cursor.
   const onPaneClick = (event: { clientX: number; clientY: number }): void => {
-    setSelected(null)
     setNodeMenu(null)
     const now = Date.now()
     const last = lastPaneClick.current
@@ -793,24 +800,6 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, compose, 
     event.stopPropagation()
   }
 
-  const saveEdit = (): void => {
-    if (selected === null) return
-    const patch: CanvasUpdateNodeRequest = {}
-    const label = draftLabel.trim()
-    if (label !== '' && label !== selected.label) patch.label = label
-    if ((selected.kind === 'text' || selected.kind === 'note') && draftContent !== selected.content) {
-      patch.content = draftContent
-    }
-    if (Object.keys(patch).length > 0) run('updateNode', updateNode(selected.id, patch))
-    setSelected(null)
-  }
-
-  const deleteSelected = (): void => {
-    if (selected === null) return
-    run('removeNode', removeNode(selected.id))
-    setSelected(null)
-  }
-
   // The canvas's own agent composer — flush into the real conversation composer
   // (setDraft + submit), sharing its exact draft and send path.
   const doComposeSubmit = (): void => {
@@ -843,10 +832,21 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, compose, 
     }
   }
 
+  // Load the generation-model dropdown options (and the current selection) from
+  // the injected face. Re-read on open so a settings change or an external
+  // `/generate-model` pick is reflected.
+  const refreshModels = useCallback(() => {
+    const opts = models.list()
+    setModelOptions(opts)
+    const sel = opts.find((o) => o.selected) ?? opts[0]
+    if (sel !== undefined) setSelectedModel(sel.key)
+  }, [models])
+
+  useEffect(() => { refreshModels() }, [refreshModels])
+
   const actions = useMemo(() => ({
     removeNode: (nodeId: string) => {
       run('removeNode', removeNode(nodeId))
-      setSelected((sel) => (sel !== null && sel.id === nodeId ? null : sel))
     },
   }), [removeNode, run])
 
@@ -854,7 +854,6 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, compose, 
   // native context menu is suppressed so our menu owns the right-click.
   const onNodeContextMenu = useCallback((event: ReactMouseEvent, node: Node): void => {
     event.preventDefault()
-    setSelected(null)
     setMenu(null)
     setNodeMenu({ x: event.clientX, y: event.clientY, nodeId: node.id })
   }, [])
@@ -862,28 +861,21 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, compose, 
   // Delete a node from the context menu (same write-back as the × button).
   const deleteNodeById = (nodeId: string): void => {
     run('removeNode', removeNode(nodeId))
-    setSelected((sel) => (sel !== null && sel.id === nodeId ? null : sel))
     setNodeMenu(null)
   }
 
-  // Duplicate a node: same kind/label/media/content, new id, offset position.
-  const duplicateNode = (nodeId: string): void => {
+  // Copy a node to the SYSTEM clipboard (image → bitmap, text/note → text), so
+  // it can be pasted into any other input box / app.
+  const copyNode = (nodeId: string): void => {
     const node: CanvasNode | undefined = canvas?.nodes.find((n: CanvasNode) => n.id === nodeId)
     if (node === undefined) return
-    const id = newId()
-    try {
-      void addNode({
-        id, kind: node.kind, label: `${node.label} 副本`,
-        x: node.x + 40, y: node.y + 40,
-        ...(node.content === undefined ? {} : { content: node.content }),
-        ...(node.url === undefined ? {} : { url: node.url }),
-        ...(node.meta === undefined ? {} : { meta: node.meta }),
-      }).then(() => setWritebackError(null))
-    } catch (error) {
+    setNodeMenu(null)
+    void copyNodeToClipboard(node).then(() => {
+      setWritebackError(null)
+    }).catch((error: unknown) => {
       const msg = error instanceof Error ? error.message : String(error)
       setWritebackError(`复制失败: ${msg}`)
-    }
-    setNodeMenu(null)
+    })
   }
 
   // Put a node into the agent composer input box (image → thumbnail attachment,
@@ -930,14 +922,7 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, compose, 
             panOnDrag={[2]}
             selectionOnDrag
             selectionMode={SelectionMode.Full}
-            onNodeClick={(_, node) => {
-              const data = node.data as unknown as CanvasNodeData
-              setSelected({
-                id: node.id,
-                label: data.label,
-                kind: data.kind,
-                ...(data.content === undefined ? {} : { content: data.content }),
-              })
+            onNodeClick={() => {
               setMenu(null)
               setNodeMenu(null)
             }}
@@ -1000,35 +985,8 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, compose, 
           {nodeMenu !== null && (
             <div className="ldd-canvas-menu ldd-canvas-node-menu" style={{ left: nodeMenu.x, top: nodeMenu.y }}>
               <button type="button" onClick={() => { deleteNodeById(nodeMenu.nodeId) }}>删除</button>
-              <button type="button" onClick={() => { duplicateNode(nodeMenu.nodeId) }}>复制</button>
+              <button type="button" onClick={() => { copyNode(nodeMenu.nodeId) }}>复制</button>
               <button type="button" onClick={() => { handleAddToInput(nodeMenu.nodeId) }}>添加至输入框</button>
-            </div>
-          )}
-
-          {selected !== null && (
-            <div className="ldd-canvas-edit">
-              <div className="ldd-canvas-edit-row">
-                <span className="ldd-canvas-edit-kind">{kindIcon(selected.kind)}<span>{KIND_LABEL[selected.kind]}</span></span>
-                <input
-                  className="ldd-canvas-edit-label"
-                  value={draftLabel}
-                  onChange={(event) => setDraftLabel(event.target.value)}
-                  onKeyDown={(event) => { if (event.key === 'Enter') saveEdit() }}
-                  placeholder="节点标题"
-                />
-                <button type="button" className="ldd-canvas-edit-save" onClick={saveEdit}>保存</button>
-                <button type="button" className="ldd-canvas-edit-delete" onClick={deleteSelected}>删除</button>
-              </div>
-
-              {(selected.kind === 'text' || selected.kind === 'note') && (
-                <textarea
-                  className="ldd-canvas-edit-content"
-                  value={draftContent}
-                  onChange={(event) => setDraftContent(event.target.value)}
-                  placeholder="内容…"
-                  rows={3}
-                />
-              )}
             </div>
           )}
 
@@ -1036,6 +994,25 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, compose, 
               to the real conversation composer so typing here = typing in the
               conversation. Lets the user work fullscreen without the chat. */}
           <div className="ldd-canvas-composer">
+            {modelOptions.length > 0 && (
+              <div className="ldd-canvas-composer-toolbar">
+                <span className="ldd-canvas-composer-model-label">生图模型</span>
+                <select
+                  className="ldd-canvas-composer-model"
+                  value={selectedModel}
+                  onFocus={refreshModels}
+                  onChange={(event) => {
+                    const key = event.target.value
+                    setSelectedModel(key)
+                    models.select(key)
+                  }}
+                >
+                  {modelOptions.map((m) => (
+                    <option key={m.key} value={m.key}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             {composeFiles.length > 0 && (
               <div className="ldd-canvas-composer-attachments">
                 {composeFiles.map((file, index) => (

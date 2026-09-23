@@ -55,9 +55,29 @@ import { CanvasView } from './CanvasView.tsx'
 import type { CanvasUploadedAsset } from './CanvasView.tsx'
 import { CanvasPanelButton } from './CanvasPanelButton.tsx'
 import { CanvasFooterButton } from './CanvasFooterButton.tsx'
+import { resolveImagePickerModels } from './generate-models.ts'
 // The generated Remote contribution (TYPERT_REMOTE): a pure descriptor/codec
 // value, inlined by tsdown into lib/client.js (no shared runtime identity).
 import canvasRemote from '@ldd/dsh-canvas/remote'
+
+/** Structural read face of the settings-scope binder (the `settingsScope`
+ *  service the ui-settings plugin provides). Read via `ctx.get` for the same
+ *  reason as `conversation`/`sessions`: the canvas must not import the settings
+ *  package's value, and must keep working when it is absent. */
+interface CanvasSettingsScopeBinderLike {
+  bind<T>(spec: { namespace: string }): {
+    getSnapshot(): { status: 'loading' | 'ready' | 'unavailable'; value: T | undefined }
+    subscribe(listener: () => void): () => void
+  }
+}
+
+/** The generate-image settings value shape (a structural copy of
+ *  @ldd/dsh-generate's GenerationSettings). */
+interface CanvasImageSettings {
+  default?: string
+  models?: Array<{ provider?: string; model?: string }>
+  provider?: string
+}
 
 /** Structural read face of the runtime's `readAttachment` (brand-free). */
 interface CanvasSessionLike {
@@ -68,6 +88,8 @@ interface CanvasSessionLike {
   }>
   /** Send one text prompt into the session's agent (queue mode). */
   prompt(content: readonly { readonly type: 'text'; readonly text: string }[], mode: 'queue' | 'steer'): Promise<unknown>
+  /** Run a slash command against the session (e.g. `/generate-model image <key>`). */
+  command(line: string): Promise<unknown>
 }
 
 /** Structural read face of the runtime sessions service (binding + scope lookup). */
@@ -282,6 +304,23 @@ let mountFailure: string | null = null
  * @returns the Slot `inject` factory: session in, face out.
  */
 function createCanvasFace(ctx: ClientContext) {
+  // Bound once per plugin apply (settingsScope is a root service): the
+  // generate-image scope feeding the canvas composer's model dropdown, plus a
+  // per-session override mirror so the dropdown's check mark tracks the canvas's
+  // own `/generate-model` picks across turns.
+  let imageScope: { getSnapshot(): { status: 'loading' | 'ready' | 'unavailable'; value: CanvasImageSettings | undefined } } | undefined
+  const imageOverrides = new Map<string, string>()
+  const imageModelsOf = (): { models: Array<{ key: string; label: string; isDefault: boolean }>; defaultKey: string } => {
+    if (imageScope === undefined) {
+      const binder = ctx.get('settingsScope') as CanvasSettingsScopeBinderLike | undefined
+      imageScope = binder?.bind<CanvasImageSettings>({ namespace: 'generate-image' })
+    }
+    const snapshot = imageScope?.getSnapshot()
+    if (snapshot === undefined || snapshot.status !== 'ready' || snapshot.value === undefined) {
+      return { models: [], defaultKey: '' }
+    }
+    return resolveImagePickerModels(snapshot.value)
+  }
   return (sessionId: SessionId) => {
     const sessionOf = (): CanvasSessionLike => {
       // Resolve lazily per call so a view mounted before the session bound
@@ -386,6 +425,60 @@ function createCanvasFace(ctx: ClientContext) {
           ? (node.content ?? node.label)
           : `[${KIND_LABEL[node.kind]}] ${node.label}`
         input.setDraft(text)
+      },
+      copyNodeToClipboard: async (node: CanvasNode): Promise<void> => {
+        // Copy an image to the SYSTEM clipboard (paste into other apps), a
+        // text/note as plain text, and media as a `[类型] 标题` text fallback.
+        const writeText = async (text: string): Promise<void> => {
+          if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText !== undefined) {
+            await navigator.clipboard.writeText(text)
+            return
+          }
+          throw new Error('canvas: 当前环境不支持剪贴板')
+        }
+        if (node.kind === 'text' || node.kind === 'note') {
+          await writeText(node.content ?? node.label)
+          return
+        }
+        if (node.kind !== 'image' || !isSha(node.url) || node.meta === undefined) {
+          await writeText(`[${KIND_LABEL[node.kind]}] ${node.label}`)
+          return
+        }
+        const mediaType = typeof node.meta.mediaType === 'string' ? node.meta.mediaType : undefined
+        const bytes = typeof node.meta.bytes === 'number' ? node.meta.bytes : undefined
+        const width = typeof node.meta.width === 'number' ? node.meta.width : undefined
+        const height = typeof node.meta.height === 'number' ? node.meta.height : undefined
+        if (mediaType === undefined || bytes === undefined || width === undefined || height === undefined) {
+          await writeText(`[图片] ${node.label}`)
+          return
+        }
+        const saved = unwrap(await remoteOf().readAsset(sessionId, {
+          attachmentId: node.url!, mediaType, bytes, width, height,
+        }), 'readAsset')
+        const binary = atob(saved.dataBase64)
+        const raw = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i += 1) raw[i] = binary.charCodeAt(i)
+        const blob = new Blob([raw.buffer], { type: saved.mediaType })
+        if (typeof navigator === 'undefined' || navigator.clipboard?.write === undefined || typeof ClipboardItem === 'undefined') {
+          await writeText(`[图片] ${node.label}`)
+          return
+        }
+        await navigator.clipboard.write([new ClipboardItem({ [saved.mediaType]: blob })])
+      },
+      models: {
+        list: (): Array<{ key: string; label: string; selected: boolean }> => {
+          const { models, defaultKey } = imageModelsOf()
+          const override = imageOverrides.get(String(sessionId))
+          return models.map((m) => ({
+            key: m.key,
+            label: m.label,
+            selected: override !== undefined ? m.key === override : (m.isDefault || m.key === defaultKey),
+          }))
+        },
+        select: (key: string): void => {
+          imageOverrides.set(String(sessionId), key)
+          void sessionOf().command(`/generate-model image ${key}`).catch(() => {})
+        },
       },
       compose: {
         setDraft: (text: string): void => {

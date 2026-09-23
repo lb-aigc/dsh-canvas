@@ -21,6 +21,19 @@ export interface CanvasComposer {
     /** Send the current draft + attachments through the normal composer path. */
     submit(): void;
 }
+/** One selectable generation model in the canvas composer's dropdown. */
+export interface CanvasModelOption {
+    key: string;
+    label: string;
+    selected: boolean;
+}
+/** Generation-model switch face (drives the `/generate-model` slash command). */
+export interface CanvasModels {
+    /** The configured image models for the current session's dropdown. */
+    list(): CanvasModelOption[];
+    /** Temporarily switch this session's image model (does not change the default). */
+    select(key: string): void;
+}
 /** Injected per-session canvas face: image loader + one-shot agent prompt + write-back. */
 export interface CanvasViewInjected extends CanvasWriteback {
     loadImage: (ref: CanvasReadAssetRequest) => Promise<string>;
@@ -28,6 +41,10 @@ export interface CanvasViewInjected extends CanvasWriteback {
     /** Put a node into the agent composer input box (image → thumbnail attachment,
      *  text/note → draft text), without sending. */
     addNodeToInput: (node: CanvasNode) => Promise<void>;
+    /** Copy a node to the SYSTEM clipboard (image → bitmap, text/note → text). */
+    copyNodeToClipboard: (node: CanvasNode) => Promise<void>;
+    /** Generation-model switch for the canvas composer's dropdown. */
+    models: CanvasModels;
     /** The canvas's own composer input (drives the real conversation composer). */
     compose: CanvasComposer;
     /** Open the native file picker (menu-bar upload). */
@@ -68,6 +85,10 @@ export interface CanvasViewProps {
     ask: CanvasViewInjected['ask'];
     /** Injected composer-node injection (image → attachment, text/note → draft). */
     addNodeToInput: CanvasViewInjected['addNodeToInput'];
+    /** Injected clipboard copy (image → bitmap, text/note → text). */
+    copyNodeToClipboard: CanvasViewInjected['copyNodeToClipboard'];
+    /** Injected generation-model switch. */
+    models: CanvasViewInjected['models'];
     /** Injected canvas composer (drives the real conversation composer). */
     compose: CanvasViewInjected['compose'];
     /** Injected file picker (menu-bar upload). */
@@ -81,5 +102,5 @@ export interface CanvasViewProps {
     moveNode: CanvasWriteback['moveNode'];
     link: CanvasWriteback['link'];
 }
-export declare function CanvasView({ useProjection, loadImage, addNodeToInput, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps): import("react").JSX.Element;
+export declare function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeToClipboard, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps): import("react").JSX.Element;
 //# sourceMappingURL=CanvasView.d.ts.map
