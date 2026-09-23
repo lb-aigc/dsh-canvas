@@ -282,20 +282,8 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
   }
 
   return (
+    <>
     <div className="ldd-canvas-node" data-kind={data.kind}>
-      {/* Handles give React Flow endpoints for edges; connectable so the user can
-          drag a link between nodes (persisted via the `link` verb). */}
-      <Handle type="target" position={Position.Left} className="ldd-canvas-handle">
-        <svg className="ldd-canvas-handle-plus" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-          <path d="M8 3.5v9M3.5 8h9" />
-        </svg>
-      </Handle>
-      <Handle type="source" position={Position.Right} className="ldd-canvas-handle">
-        <svg className="ldd-canvas-handle-plus" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-          <path d="M8 3.5v9M3.5 8h9" />
-        </svg>
-      </Handle>
-
       <button
         type="button"
         className="ldd-canvas-node-delete nodrag"
@@ -323,10 +311,7 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
       )}
 
       {data.kind === 'video' && (
-        <div className="ldd-canvas-node-media">
-          <span className="ldd-canvas-node-media-glyph">{kindIcon('video')}</span>
-          <span className="ldd-canvas-node-media-caption">视频素材</span>
-        </div>
+        <div className="ldd-canvas-node-image ldd-canvas-image-placeholder" style={{ width: 240, height: 180 }}>{kindIcon('video')}视频</div>
       )}
 
       {data.kind === 'music' && (
@@ -346,6 +331,20 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
 
       <div className="ldd-canvas-node-label">{data.label}</div>
     </div>
+    {/* Connection ports float OUTSIDE the card frame (siblings, not children),
+        so the card's rounded-corner `overflow: hidden` clip can't cut them off;
+        they sit a gap away from the side, ComfyUI-style. */}
+    <Handle type="target" position={Position.Left} className="ldd-canvas-handle">
+      <svg className="ldd-canvas-handle-plus" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path d="M8 3.5v9M3.5 8h9" />
+      </svg>
+    </Handle>
+    <Handle type="source" position={Position.Right} className="ldd-canvas-handle">
+      <svg className="ldd-canvas-handle-plus" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path d="M8 3.5v9M3.5 8h9" />
+      </svg>
+    </Handle>
+    </>
   )
 }
 

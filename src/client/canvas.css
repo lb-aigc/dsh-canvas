@@ -214,6 +214,14 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+/* Kind-tinted title text, echoing the left accent strip (ComfyUI-style colored
+   node headers, kept light enough to read on both themes). */
+.ldd-canvas-node[data-kind='image'] .ldd-canvas-node-kind { color: #818cf8; }
+.ldd-canvas-node[data-kind='video'] .ldd-canvas-node-kind { color: #fbbf24; }
+.ldd-canvas-node[data-kind='music'] .ldd-canvas-node-kind { color: #34d399; }
+.ldd-canvas-node[data-kind='text'] .ldd-canvas-node-kind { color: #60a5fa; }
+.ldd-canvas-node[data-kind='note'] .ldd-canvas-node-kind { color: #c084fc; }
+
 .ldd-canvas-node-kind svg {
   fill: none;
   stroke: currentColor;
@@ -357,6 +365,17 @@
   opacity: 1;
   border-color: var(--dsw-alias-label-primary);
   color: var(--dsw-alias-label-primary);
+}
+
+/* Float the ports a gap OFF the card side. The handles are siblings of the
+   card frame (rendered outside its `overflow: hidden` clip), positioned by
+   React Flow at the edge; pull them further out so the ring sits clear of the
+   border instead of being cut in half by it. */
+.ldd-canvas-handle.react-flow__handle-left {
+  left: -14px;
+}
+.ldd-canvas-handle.react-flow__handle-right {
+  right: -14px;
 }
 
 /* ---- node delete button (hover-revealed, top-right) ---- */
