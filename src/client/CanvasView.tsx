@@ -467,14 +467,6 @@ export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFil
     }
   }, [selected])
 
-  const onNodesChange = useCallback((changes: Parameters<typeof applyNodeChanges>[0]) => {
-    setFlowNodes((nds) => applyNodeChanges(changes, nds))
-  }, [])
-
-  const onEdgesChange = useCallback((changes: Parameters<typeof applyEdgeChanges>[0]) => {
-    setFlowEdges((eds) => applyEdgeChanges(changes, eds))
-  }, [])
-
   // Fire-and-forget write-back: log (not throw) so a transient failure never
   // takes the React tree down; the projection refresh is the reconcile.
   const run = useCallback((op: string, p: Promise<unknown>) => {
@@ -483,6 +475,23 @@ export function CanvasView({ useProjection, loadImage, ask, pickFiles, uploadFil
       console.error(`[ldd-canvas] ${op} failed:`, error)
       setWritebackError(`${op}: ${msg}`)
     })
+  }, [])
+
+  const onNodesChange = useCallback((changes: Parameters<typeof applyNodeChanges>[0]) => {
+    // React Flow's keyboard delete (Backspace/Delete on a selected node) lands
+    // here as a `remove` change — it does NOT go through the × button / edit-bar
+    // write-back path. Persist the remove so the projection mirror stays
+    // authoritative; otherwise the node only vanishes locally, then resurrects on
+    // the next projection refresh (e.g. a moveNode), and its url still trips
+    // placeAssets' dedup → the same image can't be dropped back in.
+    for (const change of changes) {
+      if (change.type === 'remove') run('removeNode', removeNode(change.id))
+    }
+    setFlowNodes((nds) => applyNodeChanges(changes, nds))
+  }, [removeNode, run])
+
+  const onEdgesChange = useCallback((changes: Parameters<typeof applyEdgeChanges>[0]) => {
+    setFlowEdges((eds) => applyEdgeChanges(changes, eds))
   }, [])
 
   if (canvas === undefined) {
