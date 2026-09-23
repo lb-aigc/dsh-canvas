@@ -338,9 +338,9 @@
  * (the ComfyUI-style connection port). React Flow sizes/positions the handle at
  * the left/right vertical center; here we override its 6px solid dot. */
 .ldd-canvas-handle {
-  width: 14px;
-  height: 14px;
-  border: 1.5px solid var(--dsw-alias-label-secondary);
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--dsw-alias-label-secondary);
   border-radius: 50%;
   background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-secondary);
@@ -352,8 +352,8 @@
 }
 
 .ldd-canvas-handle-plus {
-  width: 8px;
-  height: 8px;
+  width: 11px;
+  height: 11px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.7;
@@ -372,10 +372,10 @@
    React Flow at the edge; pull them further out so the ring sits clear of the
    border instead of being cut in half by it. */
 .ldd-canvas-handle.react-flow__handle-left {
-  left: -14px;
+  left: -20px;
 }
 .ldd-canvas-handle.react-flow__handle-right {
-  right: -14px;
+  right: -20px;
 }
 
 /* ---- node delete button (hover-revealed, top-right) ---- */

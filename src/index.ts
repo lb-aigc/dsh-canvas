@@ -456,25 +456,32 @@ export function apply(ctx: Context): void {
           let before = foldCanvas(session.snapshotEvents())
           let next = before
           // 1) Mirror every reference image that is not yet on the canvas (an
-          //    image uploaded from outside the canvas still lands here).
+          //    image uploaded from outside the canvas still lands here). Newly
+          //    mirrored images stack VERTICALLY at a placeholder origin and are
+          //    tagged `autoPlace`; the client (which alone knows the live
+          //    viewport) re-anchors the whole cluster into the user's current
+          //    view and clears the flag. The host cannot place them correctly
+          //    because it has no viewport.
+          let mirrored = 0
           for (const block of blocks) {
             state.refIds.add(block.attachmentId)
             if (next.nodes.some((node) => node.url === block.attachmentId)) continue
-            const auto = next.nodes.length
             const result = addNode(next, {
               kind: 'image',
               label: block.name ?? '图片',
-              x: (auto % 4) * 220,
-              y: Math.floor(auto / 4) * 180,
+              x: 0,
+              y: mirrored * 280,
               url: block.attachmentId,
               meta: {
                 ...(block.width === undefined ? {} : { width: block.width }),
                 ...(block.height === undefined ? {} : { height: block.height }),
                 ...(block.mediaType === undefined ? {} : { mediaType: block.mediaType }),
                 ...(block.bytes === undefined ? {} : { bytes: block.bytes }),
+                autoPlace: true,
               },
             })
             next = result.state
+            mirrored += 1
           }
           // 2) Hang ONE blank downstream placeholder per submit and wire EVERY
           //    reference-image source into it — a multi-image reference converges
@@ -493,7 +500,7 @@ export function apply(ctx: Context): void {
               label: '生成中…',
               x: rightmost.x + 340,
               y: (Math.min(...ys) + Math.max(...ys)) / 2,
-              meta: { pending: true },
+              meta: { pending: true, autoPlace: true },
             })
             next = placeholder.state
             for (const source of sources) {

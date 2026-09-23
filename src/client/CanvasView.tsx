@@ -427,6 +427,9 @@ export function CanvasView({ useProjection, loadImage, ask, addNodeToInput, pick
   // The React Flow instance, captured on init so a pane double-click can map a
   // viewport (screen) coordinate into flow-space for placing a new node.
   const rfRef = useRef<ReactFlowInstance | null>(null)
+  // The canvas root element, for measuring the live viewport center when
+  // re-anchoring host-mirrored (autoPlace) node clusters.
+  const rootRef = useRef<HTMLDivElement | null>(null)
   // The add-node menu, opened by double-clicking empty canvas OR by dropping a
   // dragged connection on empty canvas: screen position (for the floating menu)
   // + flow position (where the new node lands) + optional source node (a
@@ -445,6 +448,49 @@ export function CanvasView({ useProjection, loadImage, ask, addNodeToInput, pick
       setFlowEdges(toFlowEdges(canvas))
     }
   }, [canvas])
+
+  // Re-anchor host-mirrored reference-image clusters (meta.autoPlace) into the
+  // LIVE viewport. The host mirrors external uploads at a placeholder origin
+  // (it has no viewport); the client knows where the user is looking, so it
+  // stacks the newly-mirrored source images vertically on the left and the
+  // downstream placeholder to the right — the whole cluster centered on the
+  // current view — then clears `autoPlace` so this runs exactly once per cluster.
+  // A placeholder that arrived without newly-mirrored sources (references that
+  // were already on the canvas) keeps its host-computed position; only the flag
+  // is cleared.
+  useEffect(() => {
+    if (canvas === undefined) return
+    const autoNodes = canvas.nodes.filter((n: CanvasNode) => n.meta?.autoPlace === true)
+    if (autoNodes.length === 0) return
+    const rf = rfRef.current
+    const rootEl = rootRef.current
+    if (rf === null || rootEl === null) return
+    const strip = (meta: Record<string, JsonValue>): Record<string, JsonValue> => {
+      const rest: Record<string, JsonValue> = { ...meta }
+      delete rest['autoPlace']
+      return rest
+    }
+    const sources = autoNodes.filter((n: CanvasNode) => n.meta?.pending !== true)
+    const pendings = autoNodes.filter((n: CanvasNode) => n.meta?.pending === true)
+    const rect = rootEl.getBoundingClientRect()
+    const center = rf.screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
+    const gapY = 280
+    const colX = center.x - 220
+    if (sources.length > 0) {
+      let y = center.y - ((sources.length - 1) * gapY) / 2
+      for (const node of sources) {
+        void updateNode(node.id, { x: colX, y, meta: strip(node.meta ?? {}) }).catch(() => {})
+        y += gapY
+      }
+    }
+    for (const node of pendings) {
+      if (sources.length > 0) {
+        void updateNode(node.id, { x: center.x + 220, y: center.y, meta: strip(node.meta ?? {}) }).catch(() => {})
+      } else {
+        void updateNode(node.id, { meta: strip(node.meta ?? {}) }).catch(() => {})
+      }
+    }
+  }, [canvas, updateNode])
 
   // While a dragged connection awaits its new node, overlay a local ghost node +
   // a dashed edge so the user sees the pending link (the release point + the
@@ -799,6 +845,7 @@ export function CanvasView({ useProjection, loadImage, ask, addNodeToInput, pick
       <CanvasActionsContext.Provider value={actions}>
         <div
           className="ldd-canvas-root"
+          ref={rootRef}
           onDragEnter={onCanvasDragEnter}
           onDragOver={onCanvasDragOver}
           onDragLeave={onCanvasDragLeave}
@@ -816,6 +863,9 @@ export function CanvasView({ useProjection, loadImage, ask, addNodeToInput, pick
             onConnectStart={onConnectStart}
             onConnectEnd={onConnectEnd}
             onNodeContextMenu={onNodeContextMenu}
+            // Wider connection hit radius: a link can start anywhere within this
+            // many screen px of a handle, so the user need not land dead-center.
+            connectionRadius={36}
             // Right-button drag pans the canvas; left-button drag on empty canvas
             // box-selects (normal pointer, not the grab hand), and left-dragging a
             // selected node moves the whole selection.
