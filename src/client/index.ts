@@ -85,6 +85,7 @@ interface CanvasConversationLike {
     for(actx: ClientContext): {
       setDraft(text: string): void
       addAttachments(ids: readonly string[]): boolean
+      submit(): void
     }
   }
   /** Register browser-owned draft attachments (image → thumbnail, other → file). */
@@ -309,6 +310,21 @@ function createCanvasFace(ctx: ClientContext) {
       if (!result.ok) throw new Error(result.error?.message ?? `canvas: ${verb} 失败`)
       return result.value!
     }
+    // Resolve the conversation composer input on demand (the session may not be
+    // bound yet when the view first mounts). Returns the per-session SessionInput
+    // (setDraft / addAttachments / submit) that the canvas composer drives.
+    const composerInputOf = (): {
+      setDraft(text: string): void
+      addAttachments(ids: readonly string[]): boolean
+      submit(): void
+    } => {
+      const conversation = ctx.get('conversation') as CanvasConversationLike | undefined
+      const actx = (ctx.get('sessions') as CanvasSessionsLike | undefined)?.scope(sessionId)
+      if (conversation?.input === undefined || actx === undefined) {
+        throw new Error('canvas: 当前环境不支持 agent 输入框')
+      }
+      return conversation.input.for(actx)
+    }
     return {
       loadImage: async (ref: CanvasReadAssetRequest): Promise<string> => {
         // Read through the canvas's own read channel (not session.readAttachment):
@@ -370,6 +386,23 @@ function createCanvasFace(ctx: ClientContext) {
           ? (node.content ?? node.label)
           : `[${KIND_LABEL[node.kind]}] ${node.label}`
         input.setDraft(text)
+      },
+      compose: {
+        setDraft: (text: string): void => {
+          composerInputOf().setDraft(text)
+        },
+        attachImages: (files: File[]): boolean => {
+          const conversation = ctx.get('conversation') as CanvasConversationLike | undefined
+          if (conversation?.createDrafts === undefined) {
+            throw new Error('canvas: 当前环境不支持附件上传')
+          }
+          const drafts = conversation.createDrafts(sessionId, files)
+          if (drafts.length === 0) return false
+          return composerInputOf().addAttachments(drafts.map((d) => d.id))
+        },
+        submit: (): void => {
+          composerInputOf().submit()
+        },
       },
       addNode: async (request: CanvasAddNodeRequest): Promise<CanvasState> =>
         unwrap(await remoteOf().addNode(sessionId, request), 'addNode'),

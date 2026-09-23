@@ -22,7 +22,7 @@
  * with local feedback; the projection's refresh is the authoritative reconcile.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
+import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import {
   Background,
   Controls,
@@ -55,6 +55,17 @@ export interface CanvasWriteback {
   link(request: CanvasLinkRequest): Promise<CanvasState>
 }
 
+/** Live agent-composer face: the canvas's own bottom input box drives the REAL
+ *  conversation composer — same draft, same send path, same attachments. */
+export interface CanvasComposer {
+  /** Replace the conversation draft (persisted to the real composer). */
+  setDraft(text: string): void
+  /** Register image files as real composer attachments (thumbnail drafts). */
+  attachImages(files: File[]): boolean
+  /** Send the current draft + attachments through the normal composer path. */
+  submit(): void
+}
+
 /** Injected per-session canvas face: image loader + one-shot agent prompt + write-back. */
 export interface CanvasViewInjected extends CanvasWriteback {
   loadImage: (ref: CanvasReadAssetRequest) => Promise<string>
@@ -62,6 +73,8 @@ export interface CanvasViewInjected extends CanvasWriteback {
   /** Put a node into the agent composer input box (image → thumbnail attachment,
    *  text/note → draft text), without sending. */
   addNodeToInput: (node: CanvasNode) => Promise<void>
+  /** The canvas's own composer input (drives the real conversation composer). */
+  compose: CanvasComposer
   /** Open the native file picker (menu-bar upload). */
   pickFiles: (kind?: 'image' | 'video' | 'music') => Promise<File[]>
   /** Store the given files (image → attachment, video/audio → workspace) and
@@ -102,6 +115,8 @@ export interface CanvasViewProps {
   ask: CanvasViewInjected['ask']
   /** Injected composer-node injection (image → attachment, text/note → draft). */
   addNodeToInput: CanvasViewInjected['addNodeToInput']
+  /** Injected canvas composer (drives the real conversation composer). */
+  compose: CanvasViewInjected['compose']
   /** Injected file picker (menu-bar upload). */
   pickFiles: CanvasViewInjected['pickFiles']
   /** Injected file store (image → attachment, video/audio → workspace). */
@@ -407,7 +422,7 @@ interface SelectedNode {
   content?: string
 }
 
-export function CanvasView({ useProjection, loadImage, ask, addNodeToInput, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps) {
+export function CanvasView({ useProjection, loadImage, addNodeToInput, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps) {
   const canvas = useProjection('canvas')
 
   // Local, RESPONSIVE flow state: the projection is the authoritative mirror,
@@ -419,7 +434,10 @@ export function CanvasView({ useProjection, loadImage, ask, addNodeToInput, pick
   const [selected, setSelected] = useState<SelectedNode | null>(null)
   const [draftLabel, setDraftLabel] = useState('')
   const [draftContent, setDraftContent] = useState('')
-  const [question, setQuestion] = useState('')
+  // The canvas's own agent composer: draft text + pending image attachments,
+  // flushed into the real conversation composer on send.
+  const [composeText, setComposeText] = useState('')
+  const [composeFiles, setComposeFiles] = useState<File[]>([])
   // Last write-back failure, surfaced in a dismissible banner (the user has no
   // DevTools, so console-only errors were invisible). Cleared on any success.
   const [writebackError, setWritebackError] = useState<string | null>(null)
@@ -474,13 +492,31 @@ export function CanvasView({ useProjection, loadImage, ask, addNodeToInput, pick
     const pendings = autoNodes.filter((n: CanvasNode) => n.meta?.pending === true)
     const rect = rootEl.getBoundingClientRect()
     const center = rf.screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
-    const gapY = 280
     const colX = center.x - 220
+    // Stack vertically with a PER-NODE height (not a fixed gap): image cards
+    // size to their aspect ratio (short edge 200px, long edge ≤360px) plus the
+    // head/label rows, so a fixed 280px gap overlaps tall (portrait / near-square)
+    // cards. Sum the real heights + a 36px gutter so nothing ever collides.
+    const nodeHeightOf = (node: CanvasNode): number => {
+      const w = node.meta?.['width']
+      const h = node.meta?.['height']
+      if (typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0) {
+        const ratio = w / h
+        const short = 200
+        const long = Math.min(360, short * Math.max(ratio, 1 / ratio))
+        const body = ratio >= 1 ? long / ratio : long
+        return body + 52
+      }
+      return 232 // video 4:3 placeholder / unknown
+    }
     if (sources.length > 0) {
-      let y = center.y - ((sources.length - 1) * gapY) / 2
-      for (const node of sources) {
+      const heights = sources.map(nodeHeightOf)
+      const total = heights.reduce((a: number, b: number) => a + b, 0) + (sources.length - 1) * 36
+      let y = center.y - total / 2
+      for (let i = 0; i < sources.length; i += 1) {
+        const node = sources[i]!
         void updateNode(node.id, { x: colX, y, meta: strip(node.meta ?? {}) }).catch(() => {})
-        y += gapY
+        y += heights[i]! + 36
       }
     }
     for (const node of pendings) {
@@ -601,7 +637,6 @@ export function CanvasView({ useProjection, loadImage, ask, addNodeToInput, pick
     const flow = rfRef.current?.screenToFlowPosition({ x: point.x, y: point.y })
     if (flow === undefined) return
     setSelected(null)
-    setQuestion('')
     setMenu({ x: point.x, y: point.y, flowX: flow.x, flowY: flow.y, sourceNodeId: source })
   }, [])
 
@@ -610,7 +645,6 @@ export function CanvasView({ useProjection, loadImage, ask, addNodeToInput, pick
   // maps through the React Flow instance so the node lands under the cursor.
   const onPaneClick = (event: { clientX: number; clientY: number }): void => {
     setSelected(null)
-    setQuestion('')
     setNodeMenu(null)
     const now = Date.now()
     const last = lastPaneClick.current
@@ -777,12 +811,36 @@ export function CanvasView({ useProjection, loadImage, ask, addNodeToInput, pick
     setSelected(null)
   }
 
-  const submitAsk = (): void => {
-    if (selected === null) return
-    const text = question.trim()
-    if (text === '') return
-    void ask(`关于画布上的节点「${selected.label}」（${KIND_LABEL[selected.kind]}），${text}`)
-    setQuestion('')
+  // The canvas's own agent composer — flush into the real conversation composer
+  // (setDraft + submit), sharing its exact draft and send path.
+  const doComposeSubmit = (): void => {
+    const text = composeText.trim()
+    if (text === '' && composeFiles.length === 0) return
+    try {
+      if (composeFiles.length > 0) {
+        compose.attachImages(composeFiles)
+        setComposeFiles([])
+      }
+      if (text !== '') compose.setDraft(text)
+      compose.submit()
+      setComposeText('')
+      setWritebackError(null)
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      setWritebackError(`发送失败: ${msg}`)
+    }
+  }
+
+  const pickComposeImages = async (): Promise<void> => {
+    const files = await pickFiles('image').catch(() => [] as File[])
+    if (files.length > 0) setComposeFiles((prev) => [...prev, ...files])
+  }
+
+  const onComposeKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      doComposeSubmit()
+    }
   }
 
   const actions = useMemo(() => ({
@@ -880,7 +938,6 @@ export function CanvasView({ useProjection, loadImage, ask, addNodeToInput, pick
                 kind: data.kind,
                 ...(data.content === undefined ? {} : { content: data.content }),
               })
-              setQuestion('')
               setMenu(null)
               setNodeMenu(null)
             }}
@@ -972,27 +1029,60 @@ export function CanvasView({ useProjection, loadImage, ask, addNodeToInput, pick
                   rows={3}
                 />
               )}
-
-              <div className="ldd-canvas-edit-row ldd-canvas-edit-ask">
-                <span className="ldd-canvas-ask-title">问 agent</span>
-                <input
-                  className="ldd-canvas-ask-input"
-                  value={question}
-                  onChange={(event) => setQuestion(event.target.value)}
-                  onKeyDown={(event) => { if (event.key === 'Enter') submitAsk() }}
-                  placeholder="关于这个节点你想问什么？"
-                />
-                <button
-                  type="button"
-                  className="ldd-canvas-ask-submit"
-                  onClick={submitAsk}
-                  disabled={question.trim() === ''}
-                >
-                  发送
-                </button>
-              </div>
             </div>
           )}
+
+          {/* Persistent agent composer dock — the canvas's own input box, wired
+              to the real conversation composer so typing here = typing in the
+              conversation. Lets the user work fullscreen without the chat. */}
+          <div className="ldd-canvas-composer">
+            {composeFiles.length > 0 && (
+              <div className="ldd-canvas-composer-attachments">
+                {composeFiles.map((file, index) => (
+                  <span key={index} className="ldd-canvas-composer-chip" title={file.name}>
+                    {file.name}
+                    <button
+                      type="button"
+                      className="ldd-canvas-composer-chip-remove"
+                      aria-label={`移除 ${file.name}`}
+                      onClick={() => setComposeFiles((prev) => prev.filter((_, i) => i !== index))}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="ldd-canvas-composer-row">
+              <button
+                type="button"
+                className="ldd-canvas-composer-attach"
+                title="添加图片"
+                aria-label="添加图片"
+                onClick={() => { void pickComposeImages() }}
+              >
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+                  <path d="M8 3.5v9M3.5 8h9" />
+                </svg>
+              </button>
+              <textarea
+                className="ldd-canvas-composer-input"
+                value={composeText}
+                onChange={(event) => setComposeText(event.target.value)}
+                onKeyDown={onComposeKeyDown}
+                placeholder="给 agent 发送消息…（Enter 发送，Shift+Enter 换行）"
+                rows={1}
+              />
+              <button
+                type="button"
+                className="ldd-canvas-composer-send"
+                onClick={doComposeSubmit}
+                disabled={composeText.trim() === '' && composeFiles.length === 0}
+              >
+                发送
+              </button>
+            </div>
+          </div>
         </div>
       </CanvasActionsContext.Provider>
     </LoadImageContext.Provider>

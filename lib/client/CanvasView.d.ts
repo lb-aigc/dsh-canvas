@@ -11,6 +11,16 @@ export interface CanvasWriteback {
     moveNode(nodeId: string, x: number, y: number): Promise<CanvasState>;
     link(request: CanvasLinkRequest): Promise<CanvasState>;
 }
+/** Live agent-composer face: the canvas's own bottom input box drives the REAL
+ *  conversation composer — same draft, same send path, same attachments. */
+export interface CanvasComposer {
+    /** Replace the conversation draft (persisted to the real composer). */
+    setDraft(text: string): void;
+    /** Register image files as real composer attachments (thumbnail drafts). */
+    attachImages(files: File[]): boolean;
+    /** Send the current draft + attachments through the normal composer path. */
+    submit(): void;
+}
 /** Injected per-session canvas face: image loader + one-shot agent prompt + write-back. */
 export interface CanvasViewInjected extends CanvasWriteback {
     loadImage: (ref: CanvasReadAssetRequest) => Promise<string>;
@@ -18,6 +28,8 @@ export interface CanvasViewInjected extends CanvasWriteback {
     /** Put a node into the agent composer input box (image → thumbnail attachment,
      *  text/note → draft text), without sending. */
     addNodeToInput: (node: CanvasNode) => Promise<void>;
+    /** The canvas's own composer input (drives the real conversation composer). */
+    compose: CanvasComposer;
     /** Open the native file picker (menu-bar upload). */
     pickFiles: (kind?: 'image' | 'video' | 'music') => Promise<File[]>;
     /** Store the given files (image → attachment, video/audio → workspace) and
@@ -56,6 +68,8 @@ export interface CanvasViewProps {
     ask: CanvasViewInjected['ask'];
     /** Injected composer-node injection (image → attachment, text/note → draft). */
     addNodeToInput: CanvasViewInjected['addNodeToInput'];
+    /** Injected canvas composer (drives the real conversation composer). */
+    compose: CanvasViewInjected['compose'];
     /** Injected file picker (menu-bar upload). */
     pickFiles: CanvasViewInjected['pickFiles'];
     /** Injected file store (image → attachment, video/audio → workspace). */
@@ -67,5 +81,5 @@ export interface CanvasViewProps {
     moveNode: CanvasWriteback['moveNode'];
     link: CanvasWriteback['link'];
 }
-export declare function CanvasView({ useProjection, loadImage, ask, addNodeToInput, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps): import("react").JSX.Element;
+export declare function CanvasView({ useProjection, loadImage, addNodeToInput, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps): import("react").JSX.Element;
 //# sourceMappingURL=CanvasView.d.ts.map
