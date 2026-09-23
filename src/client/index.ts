@@ -285,8 +285,12 @@ function createCanvasFace(ctx: ClientContext) {
       },
       addNode: async (request: CanvasAddNodeRequest): Promise<CanvasState> =>
         unwrap(await remoteOf().addNode(sessionId, request), 'addNode'),
-      removeNode: async (nodeId: string): Promise<CanvasState> =>
-        unwrap(await remoteOf().removeNode(sessionId, nodeId), 'removeNode'),
+      removeNode: async (nodeId: string): Promise<CanvasState> => {
+        console.error(`[ldd-canvas] client removeNode CALLED nodeId=${nodeId} sessionId=${String(sessionId)}`)
+        const result = await remoteOf().removeNode(sessionId, nodeId)
+        console.error(`[ldd-canvas] client removeNode RESULT ok=${result.ok} error=${result.error?.message ?? ''}`)
+        return unwrap(result, 'removeNode')
+      },
       updateNode: async (nodeId: string, patch: CanvasUpdateNodeRequest): Promise<CanvasState> =>
         unwrap(await remoteOf().updateNode(sessionId, nodeId, patch), 'updateNode'),
       moveNode: async (nodeId: string, x: number, y: number): Promise<CanvasState> =>

@@ -101,6 +101,7 @@ export class CanvasService extends TypertRemoteService {
     const session = this.sessionOf(sessionId)
     const before = foldCanvas(session.snapshotEvents())
     const next = removeNode(before, nodeId)
+    console.log(`[ldd-canvas] removeNode host: nodeId=${nodeId} before=${before.nodes.length} after=${next.nodes.length}`)
     session.append('canvas/state', { state: next })
     return next
   }

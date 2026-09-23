@@ -290,7 +290,7 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
 
       <button
         type="button"
-        className="ldd-canvas-node-delete"
+        className="ldd-canvas-node-delete nodrag"
         title="删除节点"
         aria-label={`删除「${data.label}」`}
         onClick={(event) => {
