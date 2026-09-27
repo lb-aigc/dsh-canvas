@@ -187,12 +187,9 @@
   border-color: var(--dsw-alias-border-l2);
 }
 
-/* Kind accent strip (left border). */
-.ldd-canvas-node[data-kind='image'] { border-left: 3px solid #6366f1; max-width: 360px; }
-.ldd-canvas-node[data-kind='video'] { border-left: 3px solid #f59e0b; }
-.ldd-canvas-node[data-kind='music'] { border-left: 3px solid #10b981; }
-.ldd-canvas-node[data-kind='text'] { border-left: 3px solid #3b82f6; }
-.ldd-canvas-node[data-kind='note'] { border-left: 3px solid #a855f7; }
+/* Image cards cap their width. No kind accent strip — the user wants clean,
+ * borderless cards; the kind glyph in the head already identifies the type. */
+.ldd-canvas-node[data-kind='image'] { max-width: 360px; }
 
 /* A resolved image card renders BORDERLESS: the picture fills the card (rounded
  * corners on the image itself), no head/label separators — the reference
