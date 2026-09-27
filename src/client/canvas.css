@@ -194,6 +194,26 @@
 .ldd-canvas-node[data-kind='text'] { border-left: 3px solid #3b82f6; }
 .ldd-canvas-node[data-kind='note'] { border-left: 3px solid #a855f7; }
 
+/* A resolved image card renders BORDERLESS: the picture fills the card (rounded
+ * corners on the image itself), no head/label separators — the reference
+ * look the user asked for. The accent strip, frame border, and chrome padding
+ * are dropped so only the image + hover actions remain. */
+.ldd-canvas-node--image {
+  border: none;
+  border-left: none;
+  background: transparent;
+  padding: 0;
+  min-width: 0;
+  max-width: none;
+  overflow: visible;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06);
+  border-radius: 10px;
+}
+
+.ldd-canvas-node--image:hover {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+
 /* ---- card head: kind glyph + caption + one meta fact ---- */
 .ldd-canvas-node-head {
   display: flex;
@@ -242,6 +262,96 @@
 .ldd-canvas-node-image {
   display: block;
   object-fit: cover;
+}
+
+/* Borderless image card: the picture is the card, rounded at its own corners. */
+.ldd-canvas-node-image--full {
+  border-radius: 10px;
+  cursor: zoom-in;
+}
+
+/* Hover-revealed preview/download actions (the reference floating toolbar). */
+.ldd-canvas-node-image-actions {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: flex;
+  gap: 4px;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.ldd-canvas-node--image:hover .ldd-canvas-node-image-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ldd-canvas-node-image-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.ldd-canvas-node-image-actions button:hover {
+  background: rgba(0, 0, 0, 0.78);
+}
+
+.ldd-canvas-node-image-actions svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---- image preview lightbox (portal, full-screen) ---- */
+.ldd-canvas-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.78);
+  cursor: zoom-out;
+}
+
+.ldd-canvas-lightbox-image {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 8px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.55);
+  cursor: default;
+}
+
+.ldd-canvas-lightbox-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ldd-canvas-lightbox-close:hover {
+  background: rgba(0, 0, 0, 0.75);
 }
 
 .ldd-canvas-image-placeholder {

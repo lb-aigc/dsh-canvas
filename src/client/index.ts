@@ -157,6 +157,7 @@ declare global {
   interface Window {
     readonly ldd?: {
       importFile(data: ArrayBuffer, fileName: string, workspacePath: string): Promise<ImportFileResultLike>
+      saveImage(data: ArrayBuffer, name: string): Promise<unknown>
     }
   }
 }
@@ -476,6 +477,30 @@ function createCanvasFace(ctx: ClientContext) {
           return
         }
         await navigator.clipboard.write([new ClipboardItem({ [saved.mediaType]: blob })])
+      },
+      downloadNodeImage: async (node: CanvasNode): Promise<void> => {
+        // Save an image node's durable bytes to disk through the Electron
+        // shell's `saveImage` IPC (the same seam the message-image lightbox
+        // download uses). Image only; other kinds have no bytes to save.
+        if (node.kind !== 'image' || !isSha(node.url) || node.meta === undefined) {
+          throw new Error('canvas: 仅图片节点可下载')
+        }
+        const mediaType = typeof node.meta.mediaType === 'string' ? node.meta.mediaType : undefined
+        const bytes = typeof node.meta.bytes === 'number' ? node.meta.bytes : undefined
+        const width = typeof node.meta.width === 'number' ? node.meta.width : undefined
+        const height = typeof node.meta.height === 'number' ? node.meta.height : undefined
+        if (mediaType === undefined || bytes === undefined || width === undefined || height === undefined) {
+          throw new Error('canvas: 图片元数据缺失，无法下载')
+        }
+        const saved = unwrap(await remoteOf().readAsset(sessionId, {
+          attachmentId: node.url!, mediaType, bytes, width, height,
+        }), 'readAsset')
+        const binary = atob(saved.dataBase64)
+        const raw = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i += 1) raw[i] = binary.charCodeAt(i)
+        const saver = window.ldd?.saveImage
+        if (saver === undefined) throw new Error('canvas: 当前环境不支持下载')
+        await saver(raw.buffer, `${node.label}.${extOf(saved.mediaType)}`)
       },
       models: {
         list: (): Array<{ key: string; label: string; selected: boolean }> => {

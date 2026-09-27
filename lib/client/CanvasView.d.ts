@@ -43,6 +43,8 @@ export interface CanvasViewInjected extends CanvasWriteback {
     addNodeToInput: (node: CanvasNode) => Promise<void>;
     /** Copy a node to the SYSTEM clipboard (image → bitmap, text/note → text). */
     copyNodeToClipboard: (node: CanvasNode) => Promise<void>;
+    /** Save an image node's bytes to disk (native save dialog). */
+    downloadNodeImage: (node: CanvasNode) => Promise<void>;
     /** Generation-model switch for the canvas composer's dropdown. */
     models: CanvasModels;
     /** The canvas's own composer input (drives the real conversation composer). */
@@ -87,6 +89,8 @@ export interface CanvasViewProps {
     addNodeToInput: CanvasViewInjected['addNodeToInput'];
     /** Injected clipboard copy (image → bitmap, text/note → text). */
     copyNodeToClipboard: CanvasViewInjected['copyNodeToClipboard'];
+    /** Injected image download (native save dialog). */
+    downloadNodeImage: CanvasViewInjected['downloadNodeImage'];
     /** Injected generation-model switch. */
     models: CanvasViewInjected['models'];
     /** Injected canvas composer (drives the real conversation composer). */
@@ -102,5 +106,5 @@ export interface CanvasViewProps {
     moveNode: CanvasWriteback['moveNode'];
     link: CanvasWriteback['link'];
 }
-export declare function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeToClipboard, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps): import("react").JSX.Element;
+export declare function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeToClipboard, downloadNodeImage, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps): import("react").JSX.Element;
 //# sourceMappingURL=CanvasView.d.ts.map

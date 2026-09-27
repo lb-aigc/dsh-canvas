@@ -49,6 +49,7 @@ declare global {
     interface Window {
         readonly ldd?: {
             importFile(data: ArrayBuffer, fileName: string, workspacePath: string): Promise<ImportFileResultLike>;
+            saveImage(data: ArrayBuffer, name: string): Promise<unknown>;
         };
     }
 }

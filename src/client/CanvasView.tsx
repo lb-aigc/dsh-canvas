@@ -22,6 +22,7 @@
  * with local feedback; the projection's refresh is the authoritative reconcile.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import {
   Background,
@@ -90,6 +91,8 @@ export interface CanvasViewInjected extends CanvasWriteback {
   addNodeToInput: (node: CanvasNode) => Promise<void>
   /** Copy a node to the SYSTEM clipboard (image → bitmap, text/note → text). */
   copyNodeToClipboard: (node: CanvasNode) => Promise<void>
+  /** Save an image node's bytes to disk (native save dialog). */
+  downloadNodeImage: (node: CanvasNode) => Promise<void>
   /** Generation-model switch for the canvas composer's dropdown. */
   models: CanvasModels
   /** The canvas's own composer input (drives the real conversation composer). */
@@ -136,6 +139,8 @@ export interface CanvasViewProps {
   addNodeToInput: CanvasViewInjected['addNodeToInput']
   /** Injected clipboard copy (image → bitmap, text/note → text). */
   copyNodeToClipboard: CanvasViewInjected['copyNodeToClipboard']
+  /** Injected image download (native save dialog). */
+  downloadNodeImage: CanvasViewInjected['downloadNodeImage']
   /** Injected generation-model switch. */
   models: CanvasViewInjected['models']
   /** Injected canvas composer (drives the real conversation composer). */
@@ -157,8 +162,9 @@ const LoadImageContext = createContext<(ref: CanvasReadAssetRequest) => Promise<
 )
 
 /** Write-back actions reachable from deep inside a node card (the delete button). */
-const CanvasActionsContext = createContext<{ removeNode: (nodeId: string) => void }>({
+const CanvasActionsContext = createContext<{ removeNode: (nodeId: string) => void; downloadNodeImage: (node: CanvasNode) => void }>({
   removeNode: () => {},
+  downloadNodeImage: () => {},
 })
 
 /** A node's `url` is either a `sha256:` attachment id or a plain http(s) url. */
@@ -270,8 +276,9 @@ function metaText(kind: CanvasNode['kind'], meta: Record<string, JsonValue> | un
 /** One node card: a head row (kind glyph + caption + meta fact) over a kind body. */
 function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
   const loadImage = useContext(LoadImageContext)
-  const { removeNode } = useContext(CanvasActionsContext)
+  const { removeNode, downloadNodeImage } = useContext(CanvasActionsContext)
   const [resolved, setResolved] = useState<string | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const sha = isShaAttachment(data.url)
   const fact = metaText(data.kind, data.meta)
 
@@ -325,9 +332,24 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
     else { displayW = long * ratio; displayH = long }
   }
 
+  // A resolved image node renders borderless (image fills the card) with
+  // hover-revealed preview/download actions; everything else keeps the
+  // three-part card (head / body / label).
+  const isImage = data.kind === 'image' && src !== null
+  const fullNode = (): CanvasNode => ({
+    id,
+    kind: data.kind,
+    label: data.label,
+    x: 0,
+    y: 0,
+    ...(data.content !== undefined ? { content: data.content } : {}),
+    ...(data.url !== undefined ? { url: data.url } : {}),
+    ...(data.meta !== undefined ? { meta: data.meta } : {}),
+  })
+
   return (
     <>
-    <div className="ldd-canvas-node" data-kind={data.kind}>
+    <div className={isImage ? 'ldd-canvas-node ldd-canvas-node--image' : 'ldd-canvas-node'} data-kind={data.kind}>
       <button
         type="button"
         className="ldd-canvas-node-delete nodrag"
@@ -343,38 +365,84 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
         </svg>
       </button>
 
-      <div className="ldd-canvas-node-head">
-        <span className="ldd-canvas-node-kind">{kindIcon(data.kind)}<span>{KIND_LABEL[data.kind]}</span></span>
-        {fact !== undefined && <span className="ldd-canvas-node-fact">{fact}</span>}
-      </div>
+      {isImage
+        ? (
+          <>
+            <img
+              className="ldd-canvas-node-image ldd-canvas-node-image--full"
+              src={src}
+              alt={data.label}
+              style={{ width: displayW, height: displayH }}
+              onClick={() => { setPreviewOpen(true) }}
+            />
+            <div className="ldd-canvas-node-image-actions nodrag">
+              <button
+                type="button"
+                title="预览"
+                aria-label={`预览「${data.label}」`}
+                onClick={() => { setPreviewOpen(true) }}
+              >
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+                  <path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z" />
+                  <circle cx="8" cy="8" r="2" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                title="下载"
+                aria-label={`下载「${data.label}」`}
+                onClick={() => {
+                  downloadNodeImage(fullNode())
+                }}
+              >
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+                  <path d="M8 2.5v7M5 6.5l3 3 3-3M3 12.5h10" />
+                </svg>
+              </button>
+            </div>
+          </>
+        )
+        : (
+          <>
+            <div className="ldd-canvas-node-head">
+              <span className="ldd-canvas-node-kind">{kindIcon(data.kind)}<span>{KIND_LABEL[data.kind]}</span></span>
+              {fact !== undefined && <span className="ldd-canvas-node-fact">{fact}</span>}
+            </div>
 
-      {data.kind === 'image' && (
-        src !== null
-          ? <img className="ldd-canvas-node-image" src={src} alt={data.label} style={{ width: displayW, height: displayH }} />
-          : <div className="ldd-canvas-node-image ldd-canvas-image-placeholder" style={{ width: 240, height: 180 }}>{kindIcon('image')}图片</div>
-      )}
+            {data.kind === 'image' && (
+              <div className="ldd-canvas-node-image ldd-canvas-image-placeholder" style={{ width: 240, height: 180 }}>{kindIcon('image')}图片</div>
+            )}
 
-      {data.kind === 'video' && (
-        <div className="ldd-canvas-node-image ldd-canvas-image-placeholder" style={{ width: 240, height: 180 }}>{kindIcon('video')}视频</div>
-      )}
+            {data.kind === 'video' && (
+              <div className="ldd-canvas-node-image ldd-canvas-image-placeholder" style={{ width: 240, height: 180 }}>{kindIcon('video')}视频</div>
+            )}
 
-      {data.kind === 'music' && (
-        <div className="ldd-canvas-node-media">
-          <span className="ldd-canvas-node-media-glyph">{kindIcon('music')}</span>
-          <span className="ldd-canvas-node-media-caption">音频素材</span>
-        </div>
-      )}
+            {data.kind === 'music' && (
+              <div className="ldd-canvas-node-media">
+                <span className="ldd-canvas-node-media-glyph">{kindIcon('music')}</span>
+                <span className="ldd-canvas-node-media-caption">音频素材</span>
+              </div>
+            )}
 
-      {hasTextBody && (
-        <div className="ldd-canvas-node-text">
-          {data.content === undefined || data.content === ''
-            ? <span className="ldd-canvas-node-text-empty">（无内容）</span>
-            : data.content}
-        </div>
-      )}
+            {hasTextBody && (
+              <div className="ldd-canvas-node-text">
+                {data.content === undefined || data.content === ''
+                  ? <span className="ldd-canvas-node-text-empty">（无内容）</span>
+                  : data.content}
+              </div>
+            )}
 
-      <div className="ldd-canvas-node-label">{data.label}</div>
+            <div className="ldd-canvas-node-label">{data.label}</div>
+          </>
+        )}
     </div>
+    {previewOpen && isImage && createPortal(
+      <div className="ldd-canvas-lightbox" role="dialog" aria-modal="true" aria-label={`预览「${data.label}」`} onClick={() => { setPreviewOpen(false) }}>
+        <img className="ldd-canvas-lightbox-image" src={src} alt={data.label} onClick={(event) => { event.stopPropagation() }} />
+        <button type="button" className="ldd-canvas-lightbox-close" aria-label="关闭预览" onClick={() => { setPreviewOpen(false) }}>×</button>
+      </div>,
+      document.body,
+    )}
     {/* Connection ports float OUTSIDE the card frame (siblings, not children),
         so the card's rounded-corner `overflow: hidden` clip can't cut them off;
         they sit a gap away from the side, ComfyUI-style. */}
@@ -437,7 +505,7 @@ function toFlowEdges(state: CanvasState): Edge[] {
   }))
 }
 
-export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeToClipboard, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps) {
+export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeToClipboard, downloadNodeImage, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps) {
   const canvas = useProjection('canvas')
 
   // Local, RESPONSIVE flow state: the projection is the authoritative mirror,
@@ -886,7 +954,10 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     removeNode: (nodeId: string) => {
       run('removeNode', removeNode(nodeId))
     },
-  }), [removeNode, run])
+    downloadNodeImage: (node: CanvasNode) => {
+      run('downloadNodeImage', downloadNodeImage(node))
+    },
+  }), [removeNode, run, downloadNodeImage])
 
   // Right-click a node → context menu (删除 / 复制 / 添加至输入框). The browser's
   // native context menu is suppressed so our menu owns the right-click.
