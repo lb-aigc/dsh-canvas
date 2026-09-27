@@ -766,7 +766,16 @@
 .ldd-canvas-composer-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* One labelled modality group (生图 / 生视频 / 生音乐 + its select). */
+.ldd-canvas-composer-model-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .ldd-canvas-composer-model-label {
@@ -778,8 +787,9 @@
 }
 
 .ldd-canvas-composer-model {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 180px;
   padding: 6px 8px;
   font-size: 13px;
   font-family: inherit;

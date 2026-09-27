@@ -61,8 +61,8 @@ export interface CanvasWriteback {
 export interface CanvasComposer {
   /** Replace the conversation draft (persisted to the real composer). */
   setDraft(text: string): void
-  /** Register image files as real composer attachments (thumbnail drafts). */
-  attachImages(files: File[]): boolean
+  /** Register files as real composer attachments (image → thumbnail, other → file). */
+  attachFiles(files: File[]): boolean
   /** Send the current draft + attachments through the normal composer path. */
   submit(): void
 }
@@ -74,12 +74,15 @@ export interface CanvasModelOption {
   selected: boolean
 }
 
+/** A generation modality the composer can switch models for. */
+export type CanvasGenKind = 'image' | 'video' | 'music'
+
 /** Generation-model switch face (drives the `/generate-model` slash command). */
 export interface CanvasModels {
-  /** The configured image models for the current session's dropdown. */
-  list(): CanvasModelOption[]
-  /** Temporarily switch this session's image model (does not change the default). */
-  select(key: string): void
+  /** The configured models for one modality's dropdown. */
+  list(kind: CanvasGenKind): CanvasModelOption[]
+  /** Temporarily switch one modality's model (does not change the default). */
+  select(kind: CanvasGenKind, key: string): void
 }
 
 /** Injected per-session canvas face: image loader + one-shot agent prompt + write-back. */
@@ -518,11 +521,10 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
   // flushed into the real conversation composer on send.
   const [composeText, setComposeText] = useState('')
   const [composeFiles, setComposeFiles] = useState<File[]>([])
-  // The selected generation model key for the composer dropdown (re-read from
-  // the face on open; this holds the picked value for the controlled <select>).
-  const [modelOptions, setModelOptions] = useState<CanvasModelOption[]>([])
-  const [selectedModel, setSelectedModel] = useState<string>('')
-  const [modelsOpen, setModelsOpen] = useState(false)
+  // Per-modality model dropdown state (re-read from the face on open; holds the
+  // picked value for each controlled <select>).
+  const [modelOptions, setModelOptions] = useState<Record<CanvasGenKind, CanvasModelOption[]>>({ image: [], video: [], music: [] })
+  const [selectedModels, setSelectedModels] = useState<Record<CanvasGenKind, string>>({ image: '', video: '', music: '' })
   // Last write-back failure, surfaced in a dismissible banner (the user has no
   // DevTools, so console-only errors were invisible). Cleared on any success.
   const [writebackError, setWritebackError] = useState<string | null>(null)
@@ -913,7 +915,7 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     if (text === '' && composeFiles.length === 0) return
     try {
       if (composeFiles.length > 0) {
-        compose.attachImages(composeFiles)
+        compose.attachFiles(composeFiles)
         setComposeFiles([])
       }
       if (text !== '') compose.setDraft(text)
@@ -926,8 +928,11 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     }
   }
 
-  const pickComposeImages = async (): Promise<void> => {
-    const files = await pickFiles('image').catch(() => [] as File[])
+  const pickComposeFiles = async (): Promise<void> => {
+    // Any file kind: images become thumbnails, everything else uploads as a
+    // file draft — the same intake the conversation composer's attach button
+    // performs.
+    const files = await pickFiles().catch(() => [] as File[])
     if (files.length > 0) setComposeFiles((prev) => [...prev, ...files])
   }
 
@@ -938,14 +943,20 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     }
   }
 
-  // Load the generation-model dropdown options (and the current selection) from
-  // the injected face. Re-read on open so a settings change or an external
-  // `/generate-model` pick is reflected.
+  // Load the generation-model dropdown options (and the current selection) for
+  // all three modalities from the injected face. Re-read on open so a settings
+  // change or an external `/generate-model` pick is reflected.
   const refreshModels = useCallback(() => {
-    const opts = models.list()
-    setModelOptions(opts)
-    const sel = opts.find((o) => o.selected) ?? opts[0]
-    if (sel !== undefined) setSelectedModel(sel.key)
+    const next: Record<CanvasGenKind, CanvasModelOption[]> = { image: [], video: [], music: [] }
+    for (const kind of ['image', 'video', 'music'] as const) {
+      next[kind] = models.list(kind)
+    }
+    setModelOptions(next)
+    setSelectedModels({
+      image: next.image.find((o) => o.selected)?.key ?? next.image[0]?.key ?? '',
+      video: next.video.find((o) => o.selected)?.key ?? next.video[0]?.key ?? '',
+      music: next.music.find((o) => o.selected)?.key ?? next.music[0]?.key ?? '',
+    })
   }, [models])
 
   useEffect(() => { refreshModels() }, [refreshModels])
@@ -1103,23 +1114,30 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
               to the real conversation composer so typing here = typing in the
               conversation. Lets the user work fullscreen without the chat. */}
           <div className="ldd-canvas-composer">
-            {modelOptions.length > 0 && (
+            {(modelOptions.image.length > 0 || modelOptions.video.length > 0 || modelOptions.music.length > 0) && (
               <div className="ldd-canvas-composer-toolbar">
-                <span className="ldd-canvas-composer-model-label">生图模型</span>
-                <select
-                  className="ldd-canvas-composer-model"
-                  value={selectedModel}
-                  onFocus={refreshModels}
-                  onChange={(event) => {
-                    const key = event.target.value
-                    setSelectedModel(key)
-                    models.select(key)
-                  }}
-                >
-                  {modelOptions.map((m) => (
-                    <option key={m.key} value={m.key}>{m.label}</option>
-                  ))}
-                </select>
+                {(['image', 'video', 'music'] as const).map((kind) => {
+                  if (modelOptions[kind].length === 0) return null
+                  return (
+                    <span key={kind} className="ldd-canvas-composer-model-group">
+                      <span className="ldd-canvas-composer-model-label">{kind === 'image' ? '生图' : kind === 'video' ? '生视频' : '生音乐'}</span>
+                      <select
+                        className="ldd-canvas-composer-model"
+                        value={selectedModels[kind]}
+                        onFocus={refreshModels}
+                        onChange={(event) => {
+                          const key = event.target.value
+                          setSelectedModels((prev) => ({ ...prev, [kind]: key }))
+                          models.select(kind, key)
+                        }}
+                      >
+                        {modelOptions[kind].map((m) => (
+                          <option key={m.key} value={m.key}>{m.label}</option>
+                        ))}
+                      </select>
+                    </span>
+                  )
+                })}
               </div>
             )}
             {composeFiles.length > 0 && (
@@ -1143,9 +1161,9 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
               <button
                 type="button"
                 className="ldd-canvas-composer-attach"
-                title="添加图片"
-                aria-label="添加图片"
-                onClick={() => { void pickComposeImages() }}
+                title="添加附件"
+                aria-label="添加附件"
+                onClick={() => { void pickComposeFiles() }}
               >
                 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
                   <path d="M8 3.5v9M3.5 8h9" />

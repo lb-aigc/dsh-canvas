@@ -16,8 +16,8 @@ export interface CanvasWriteback {
 export interface CanvasComposer {
     /** Replace the conversation draft (persisted to the real composer). */
     setDraft(text: string): void;
-    /** Register image files as real composer attachments (thumbnail drafts). */
-    attachImages(files: File[]): boolean;
+    /** Register files as real composer attachments (image → thumbnail, other → file). */
+    attachFiles(files: File[]): boolean;
     /** Send the current draft + attachments through the normal composer path. */
     submit(): void;
 }
@@ -27,12 +27,14 @@ export interface CanvasModelOption {
     label: string;
     selected: boolean;
 }
+/** A generation modality the composer can switch models for. */
+export type CanvasGenKind = 'image' | 'video' | 'music';
 /** Generation-model switch face (drives the `/generate-model` slash command). */
 export interface CanvasModels {
-    /** The configured image models for the current session's dropdown. */
-    list(): CanvasModelOption[];
-    /** Temporarily switch this session's image model (does not change the default). */
-    select(key: string): void;
+    /** The configured models for one modality's dropdown. */
+    list(kind: CanvasGenKind): CanvasModelOption[];
+    /** Temporarily switch one modality's model (does not change the default). */
+    select(kind: CanvasGenKind, key: string): void;
 }
 /** Injected per-session canvas face: image loader + one-shot agent prompt + write-back. */
 export interface CanvasViewInjected extends CanvasWriteback {

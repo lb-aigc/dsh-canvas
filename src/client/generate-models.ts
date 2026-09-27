@@ -1,14 +1,15 @@
 /**
- * @ldd/dsh-canvas — image generation-model catalog (browser half).
+ * @ldd/dsh-canvas — generation-model catalog (browser half).
  *
- * The canvas's own composer needs a "switch generation model" dropdown without
- * importing @ldd/dsh-generate (cross-plugin value imports are a bundle-purity
- * error, and the canvas is independently published). It therefore carries a
- * SELF-CONTAINED copy of the image provider catalog and the picker-resolution
- * rules, and drives the switch through the SAME `/generate-model image <key>`
- * slash command the generate plugin registers. The provider/model ids and
- * labels here MUST stay in sync with @ldd/dsh-generate's
- * `src/client/presets.ts` IMAGE_PRESETS.
+ * The canvas's own composer needs a "switch generation model" dropdown for
+ * ALL THREE modalities (image / video / music) without importing
+ * @ldd/dsh-generate (cross-plugin value imports are a bundle-purity error, and
+ * the canvas is independently published). It therefore carries a
+ * SELF-CONTAINED copy of the provider catalog and the picker-resolution rules,
+ * and drives the switch through the SAME `/generate-model <kind> <key>` slash
+ * command the generate plugin registers. The provider/model ids and labels here
+ * MUST stay in sync with @ldd/dsh-generate's `src/client/presets.ts`
+ * IMAGE_PRESETS / VIDEO_PRESETS / MUSIC_PRESETS.
  */
 
 /** A suggested model/capability id for a provider's model field. */
@@ -17,19 +18,25 @@ export interface ModelSuggestion {
   readonly label: string
 }
 
-export interface ImagePreset {
+/** A provider preset (id + label + its selectable models). `suggestedModels`
+ *  doubles as "this provider expands into N selectable models" — a provider
+ *  with one suggestion is a single-model entry, one with many is a version /
+ *  capability list. The image `kie` preset marks `aggregator` because one
+ *  configured entry + one key reaches every model; the video/music presets
+ *  are simpler (one entry = the chosen model/version). */
+export interface GenerationPreset {
   readonly id: string
   readonly label: string
   readonly suggestedModels: readonly ModelSuggestion[]
-  /** True for an aggregator (KIE): one configured entry lists every model. */
+  /** True for an aggregator (KIE image): one configured entry lists every model. */
   readonly aggregator?: boolean
 }
 
 export const CUSTOM_PROVIDER_ID = 'custom'
 export const DEFAULT_PROVIDER = 'mock'
 
-/** Mirror of @ldd/dsh-generate's IMAGE_PRESETS (image half only). */
-export const IMAGE_PRESETS: readonly ImagePreset[] = [
+/** Mirror of @ldd/dsh-generate's IMAGE_PRESETS. */
+export const IMAGE_PRESETS: readonly GenerationPreset[] = [
   { id: 'mock', label: 'Mock（占位）', suggestedModels: [] },
   {
     id: 'gpt-image',
@@ -77,6 +84,33 @@ export const IMAGE_PRESETS: readonly ImagePreset[] = [
   },
 ]
 
+/** Mirror of @ldd/dsh-generate's VIDEO_PRESETS. */
+export const VIDEO_PRESETS: readonly GenerationPreset[] = [
+  { id: 'mock', label: 'Mock（占位）', suggestedModels: [] },
+  {
+    id: 'kie',
+    label: 'KIE（聚合中转）',
+    suggestedModels: [{ id: 'bytedance/seedance-2-5', label: 'Seedance 2.5' }],
+  },
+]
+
+/** Mirror of @ldd/dsh-generate's MUSIC_PRESETS. */
+export const MUSIC_PRESETS: readonly GenerationPreset[] = [
+  { id: 'mock', label: 'Mock（占位）', suggestedModels: [] },
+  {
+    id: 'suno',
+    label: 'Suno（KIE 音乐）',
+    suggestedModels: [
+      { id: 'V5_5', label: 'V5.5（定制模型）' },
+      { id: 'V5', label: 'V5（表现力强、更快）' },
+      { id: 'V4_5PLUS', label: 'V4.5+（更丰富音质，最长 8 分钟）' },
+      { id: 'V4_5', label: 'V4.5（更智能提示词）' },
+      { id: 'V4_5ALL', label: 'V4.5 ALL' },
+      { id: 'V4', label: 'V4' },
+    ],
+  },
+]
+
 /** One selectable generation model (routing key + label). */
 export interface PickerModel {
   readonly key: string
@@ -88,7 +122,7 @@ export interface PickerModel {
 function routeKeyOf(
   models: readonly { provider?: string; model?: string }[],
   index: number,
-  presets: readonly ImagePreset[],
+  presets: readonly GenerationPreset[],
 ): string {
   const provider = models[index]?.provider || DEFAULT_PROVIDER
   const preset = presets.find((p) => p.id === provider)
@@ -106,7 +140,7 @@ function routeKeyOf(
 function normalizeDefaultKey(
   rawDefault: string,
   entries: readonly { provider?: string; model?: string }[],
-  presets: readonly ImagePreset[],
+  presets: readonly GenerationPreset[],
 ): string {
   if (rawDefault === '') return rawDefault
   if (rawDefault.includes(':')) return rawDefault
@@ -121,15 +155,18 @@ function normalizeDefaultKey(
 }
 
 /**
- * Resolve the generate-image settings value into the dropdown's model list.
- * An aggregator entry (KIE) expands into every one of its capabilities;
+ * Resolve one modality's settings value into the dropdown's model list. An
+ * aggregator entry (KIE image) expands into every one of its capabilities;
  * non-aggregators stay one entry = one model. Keys mirror the Host so a pick
  * routes to the exact same model the generate tool would.
  */
-export function resolveImagePickerModels(value: {
-  default?: string
-  models?: Array<{ provider?: string; model?: string }>
-} | undefined): { models: PickerModel[]; defaultKey: string } {
+export function resolvePickerModels(
+  value: {
+    default?: string
+    models?: Array<{ provider?: string; model?: string }>
+  } | undefined,
+  presets: readonly GenerationPreset[],
+): { models: PickerModel[]; defaultKey: string } {
   const v = (value ?? {}) as Record<string, unknown>
   const rawModels = Array.isArray(v.models) && (v.models as unknown[]).length > 0
     ? v.models as Array<Record<string, unknown>>
@@ -142,7 +179,7 @@ export function resolveImagePickerModels(value: {
   const seenKeys = new Set<string>()
   rawModels.forEach((entry, index) => {
     const provider = keyed[index]?.provider ?? DEFAULT_PROVIDER
-    const preset = IMAGE_PRESETS.find((p) => p.id === provider)
+    const preset = presets.find((p) => p.id === provider)
     if (preset !== undefined && preset.suggestedModels.length > 0 && provider !== CUSTOM_PROVIDER_ID) {
       for (const suggestion of preset.suggestedModels) {
         const key = `${provider}:${suggestion.id}`
@@ -151,7 +188,7 @@ export function resolveImagePickerModels(value: {
         models.push({ key, label: suggestion.label, isDefault: false })
       }
     } else {
-      const key = routeKeyOf(keyed, index, IMAGE_PRESETS)
+      const key = routeKeyOf(keyed, index, presets)
       if (seenKeys.has(key)) return
       seenKeys.add(key)
       const modelId = keyed[index]?.model ?? ''
@@ -163,10 +200,18 @@ export function resolveImagePickerModels(value: {
   const defaultKey = normalizeDefaultKey(
     typeof v.default === 'string' ? v.default : '',
     keyed,
-    IMAGE_PRESETS,
+    presets,
   ) || models[0]?.key || DEFAULT_PROVIDER
   return {
     models: models.map((m) => ({ ...m, isDefault: m.key === defaultKey })),
     defaultKey,
   }
+}
+
+/** Backward-compatible alias: the image half of the old single-modality API. */
+export function resolveImagePickerModels(value: {
+  default?: string
+  models?: Array<{ provider?: string; model?: string }>
+} | undefined): { models: PickerModel[]; defaultKey: string } {
+  return resolvePickerModels(value, IMAGE_PRESETS)
 }

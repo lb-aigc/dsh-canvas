@@ -55,7 +55,8 @@ import { CanvasView } from './CanvasView.tsx'
 import type { CanvasUploadedAsset } from './CanvasView.tsx'
 import { CanvasPanelButton } from './CanvasPanelButton.tsx'
 import { CanvasFooterButton } from './CanvasFooterButton.tsx'
-import { resolveImagePickerModels } from './generate-models.ts'
+import { IMAGE_PRESETS, MUSIC_PRESETS, VIDEO_PRESETS, resolvePickerModels } from './generate-models.ts'
+import type { GenerationPreset } from './generate-models.ts'
 // The generated Remote contribution (TYPERT_REMOTE): a pure descriptor/codec
 // value, inlined by tsdown into lib/client.js (no shared runtime identity).
 import canvasRemote from '@ldd/dsh-canvas/remote'
@@ -305,31 +306,51 @@ let mountFailure: string | null = null
  * @returns the Slot `inject` factory: session in, face out.
  */
 function createCanvasFace(ctx: ClientContext) {
-  // Bound once per plugin apply (settingsScope is a root service): the
-  // generate-image scope feeding the canvas composer's model dropdown, plus a
-  // per-session override mirror so the dropdown's check mark tracks the canvas's
-  // own `/generate-model` picks across turns.
-  let imageScope: { getSnapshot(): { status: 'loading' | 'ready' | 'unavailable'; value: CanvasImageSettings | undefined } } | undefined
-  const imageOverrides = new Map<string, string>()
-  const imageModelsOf = (): { models: Array<{ key: string; label: string; isDefault: boolean }>; defaultKey: string } => {
-    if (imageScope === undefined) {
+  // Bound once per plugin apply (settingsScope is a root service): the three
+  // generation scopes (image / video / music) feeding the canvas composer's
+  // model dropdowns, plus a per-session override mirror per modality so the
+  // dropdowns' check marks track the canvas's own `/generate-model` picks
+  // across turns.
+  type GenKind = 'image' | 'video' | 'music'
+  type ScopeLike = { getSnapshot(): { status: 'loading' | 'ready' | 'unavailable'; value: CanvasImageSettings | undefined } } | undefined
+  type PickerResult = { models: Array<{ key: string; label: string; isDefault: boolean }>; defaultKey: string }
+  const GEN_NAMESPACE: Record<GenKind, string> = {
+    image: 'generate-image',
+    video: 'generate-video',
+    music: 'generate-music',
+  }
+  const GEN_PRESETS: Record<GenKind, readonly GenerationPreset[]> = {
+    image: IMAGE_PRESETS,
+    video: VIDEO_PRESETS,
+    music: MUSIC_PRESETS,
+  }
+  const scopes: Partial<Record<GenKind, ScopeLike>> = {}
+  const overrides: Record<GenKind, Map<string, string>> = {
+    image: new Map(),
+    video: new Map(),
+    music: new Map(),
+  }
+  const modelsOf = (kind: GenKind): PickerResult => {
+    if (scopes[kind] === undefined) {
       const binder = ctx.get('settingsScope') as CanvasSettingsScopeBinderLike | undefined
-      imageScope = binder?.bind<CanvasImageSettings>({ namespace: 'generate-image' })
+      scopes[kind] = binder?.bind<CanvasImageSettings>({ namespace: GEN_NAMESPACE[kind] })
     }
-    const snapshot = imageScope?.getSnapshot()
+    const snapshot = scopes[kind]?.getSnapshot()
     if (snapshot === undefined || snapshot.status !== 'ready' || snapshot.value === undefined) {
       return { models: [], defaultKey: '' }
     }
-    return resolveImagePickerModels(snapshot.value)
+    return resolvePickerModels(snapshot.value, GEN_PRESETS[kind])
   }
   // Fold external model switches (the conversation composer's picker issues the
   // same `/generate-model` command and broadcasts this event) into the canvas
-  // dropdown's override mirror, so the two pickers stay in sync.
+  // dropdowns' override mirrors, so the pickers stay in sync.
   ctx.effect(() => {
     const handler = (event: Event): void => {
       const detail = (event as CustomEvent<{ sessionId: string; kind: string; key: string }>).detail
       if (detail === undefined || typeof detail.sessionId !== 'string') return
-      if (detail.kind === 'image') imageOverrides.set(detail.sessionId, detail.key)
+      const kind = detail.kind as GenKind
+      if (kind !== 'image' && kind !== 'video' && kind !== 'music') return
+      overrides[kind].set(detail.sessionId, detail.key)
     }
     window.addEventListener('dsh:generate-model-changed', handler)
     return () => window.removeEventListener('dsh:generate-model-changed', handler)
@@ -503,30 +524,30 @@ function createCanvasFace(ctx: ClientContext) {
         await saver(raw.buffer, `${node.label}.${extOf(saved.mediaType)}`)
       },
       models: {
-        list: (): Array<{ key: string; label: string; selected: boolean }> => {
-          const { models, defaultKey } = imageModelsOf()
-          const override = imageOverrides.get(String(sessionId))
+        list: (kind: GenKind): Array<{ key: string; label: string; selected: boolean }> => {
+          const { models, defaultKey } = modelsOf(kind)
+          const override = overrides[kind].get(String(sessionId))
           return models.map((m) => ({
             key: m.key,
             label: m.label,
             selected: override !== undefined ? m.key === override : (m.isDefault || m.key === defaultKey),
           }))
         },
-        select: (key: string): void => {
-          imageOverrides.set(String(sessionId), key)
+        select: (kind: GenKind, key: string): void => {
+          overrides[kind].set(String(sessionId), key)
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('dsh:generate-model-changed', {
-              detail: { sessionId: String(sessionId), kind: 'image', key },
+              detail: { sessionId: String(sessionId), kind, key },
             }))
           }
-          void sessionOf().command(`/generate-model image ${key}`).catch(() => {})
+          void sessionOf().command(`/generate-model ${kind} ${key}`).catch(() => {})
         },
       },
       compose: {
         setDraft: (text: string): void => {
           composerInputOf().setDraft(text)
         },
-        attachImages: (files: File[]): boolean => {
+        attachFiles: (files: File[]): boolean => {
           const conversation = ctx.get('conversation') as CanvasConversationLike | undefined
           if (conversation?.createDrafts === undefined) {
             throw new Error('canvas: 当前环境不支持附件上传')
