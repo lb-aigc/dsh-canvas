@@ -56,13 +56,39 @@ export interface CanvasWriteback {
   link(request: CanvasLinkRequest): Promise<CanvasState>
 }
 
-/** Live agent-composer face: the canvas's own bottom input box drives the REAL
- *  conversation composer — same draft, same send path, same attachments. */
+/** One mirrored composer attachment (image → previewUrl, file → name only). */
+export interface CanvasComposerAttachment {
+  id: string
+  kind: 'image' | 'file'
+  name: string
+  previewUrl?: string
+}
+
+/** The mirrored slice of the conversation composer the canvas input box shows:
+ *  the SAME draft, attachments, reference chips, and phase as the real composer,
+ *  so both views always agree and sending fires exactly one message. */
+export interface CanvasComposerSnapshot {
+  draft: string
+  attachments: readonly CanvasComposerAttachment[]
+  occurrences: readonly string[]
+  phase: 'plain' | 'adjudicating' | 'claimed' | 'submitting'
+  queueCount: number
+}
+
+/** Live agent-composer face: the canvas's own bottom input box is a FULL view of
+ *  the real conversation composer — same draft, same send path, same attachments
+ *  (bidirectionally synced via subscribe/getSnapshot). */
 export interface CanvasComposer {
+  /** Read the current mirrored composer state. */
+  getSnapshot(): CanvasComposerSnapshot
+  /** Subscribe to composer-state changes (returns an unsubscribe). */
+  subscribe(cb: () => void): () => void
   /** Replace the conversation draft (persisted to the real composer). */
   setDraft(text: string): void
   /** Register files as real composer attachments (image → thumbnail, other → file). */
   attachFiles(files: File[]): boolean
+  /** Remove one composer attachment. */
+  removeAttachment(id: string): boolean
   /** Send the current draft + attachments through the normal composer path. */
   submit(): void
 }
@@ -517,10 +543,15 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
   const [flowNodes, setFlowNodes] = useState<Node[]>([])
   const [flowEdges, setFlowEdges] = useState<Edge[]>([])
 
-  // The canvas's own agent composer: draft text + pending image attachments,
-  // flushed into the real conversation composer on send.
-  const [composeText, setComposeText] = useState('')
-  const [composeFiles, setComposeFiles] = useState<File[]>([])
+  // The canvas's own agent composer is a FULL VIEW of the real conversation
+  // composer: it subscribes to the underlying SessionInput state, so draft text,
+  // attachments, and reference chips stay bidirectionally in sync (typing here
+  // updates the conversation composer and vice versa; sending fires one message).
+  const [composerSnap, setComposerSnap] = useState<CanvasComposerSnapshot>(() => compose.getSnapshot())
+  useEffect(() => {
+    setComposerSnap(compose.getSnapshot())
+    return compose.subscribe(() => { setComposerSnap(compose.getSnapshot()) })
+  }, [compose])
   // Per-modality model dropdown state (re-read from the face on open; holds the
   // picked value for each controlled <select>).
   const [modelOptions, setModelOptions] = useState<Record<CanvasGenKind, CanvasModelOption[]>>({ image: [], video: [], music: [] })
@@ -908,19 +939,14 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     event.stopPropagation()
   }
 
-  // The canvas's own agent composer — flush into the real conversation composer
-  // (setDraft + submit), sharing its exact draft and send path.
+  // The canvas's own agent composer — send the CURRENT conversation composer
+  // state (which this view mirrors). Draft + attachments already live in the
+  // underlying SessionInput; submit fires that exact single message.
   const doComposeSubmit = (): void => {
-    const text = composeText.trim()
-    if (text === '' && composeFiles.length === 0) return
+    const text = composerSnap.draft.trim()
+    if (text === '' && composerSnap.attachments.length === 0) return
     try {
-      if (composeFiles.length > 0) {
-        compose.attachFiles(composeFiles)
-        setComposeFiles([])
-      }
-      if (text !== '') compose.setDraft(text)
       compose.submit()
-      setComposeText('')
       setWritebackError(null)
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
@@ -933,7 +959,11 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     // file draft — the same intake the conversation composer's attach button
     // performs.
     const files = await pickFiles().catch(() => [] as File[])
-    if (files.length > 0) setComposeFiles((prev) => [...prev, ...files])
+    if (files.length > 0) compose.attachFiles(files)
+  }
+
+  const onComposeChange = (text: string): void => {
+    compose.setDraft(text)
   }
 
   const onComposeKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
@@ -1110,9 +1140,10 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
             </div>
           )}
 
-          {/* Persistent agent composer dock — the canvas's own input box, wired
-              to the real conversation composer so typing here = typing in the
-              conversation. Lets the user work fullscreen without the chat. */}
+          {/* Persistent agent composer dock — a FULL view of the real
+              conversation composer: it mirrors the same draft / attachments /
+              reference chips, so typing here = typing in the conversation and
+              sending fires exactly one message. */}
           <div className="ldd-canvas-composer">
             {(modelOptions.image.length > 0 || modelOptions.video.length > 0 || modelOptions.music.length > 0) && (
               <div className="ldd-canvas-composer-toolbar">
@@ -1140,16 +1171,24 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
                 })}
               </div>
             )}
-            {composeFiles.length > 0 && (
+            {(composerSnap.occurrences.length > 0 || composerSnap.attachments.length > 0) && (
               <div className="ldd-canvas-composer-attachments">
-                {composeFiles.map((file, index) => (
-                  <span key={index} className="ldd-canvas-composer-chip" title={file.name}>
-                    {file.name}
+                {composerSnap.occurrences.map((label, index) => (
+                  <span key={`ref-${index}`} className="ldd-canvas-composer-chip ldd-canvas-composer-chip-ref" title={label}>
+                    {label}
+                  </span>
+                ))}
+                {composerSnap.attachments.map((att) => (
+                  <span key={att.id} className="ldd-canvas-composer-chip" title={att.name}>
+                    {att.previewUrl !== undefined
+                      ? <img className="ldd-canvas-composer-thumb" src={att.previewUrl} alt={att.name} />
+                      : null}
+                    {att.name}
                     <button
                       type="button"
                       className="ldd-canvas-composer-chip-remove"
-                      aria-label={`移除 ${file.name}`}
-                      onClick={() => setComposeFiles((prev) => prev.filter((_, i) => i !== index))}
+                      aria-label={`移除 ${att.name}`}
+                      onClick={() => { compose.removeAttachment(att.id) }}
                     >
                       ×
                     </button>
@@ -1171,8 +1210,8 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
               </button>
               <textarea
                 className="ldd-canvas-composer-input"
-                value={composeText}
-                onChange={(event) => setComposeText(event.target.value)}
+                value={composerSnap.draft}
+                onChange={(event) => onComposeChange(event.target.value)}
                 onKeyDown={onComposeKeyDown}
                 placeholder="给 agent 发送消息…（Enter 发送，Shift+Enter 换行）"
                 rows={1}
@@ -1181,7 +1220,7 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
                 type="button"
                 className="ldd-canvas-composer-send"
                 onClick={doComposeSubmit}
-                disabled={composeText.trim() === '' && composeFiles.length === 0}
+                disabled={composerSnap.draft.trim() === '' && composerSnap.attachments.length === 0}
               >
                 发送
               </button>

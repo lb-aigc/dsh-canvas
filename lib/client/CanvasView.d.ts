@@ -11,13 +11,37 @@ export interface CanvasWriteback {
     moveNode(nodeId: string, x: number, y: number): Promise<CanvasState>;
     link(request: CanvasLinkRequest): Promise<CanvasState>;
 }
-/** Live agent-composer face: the canvas's own bottom input box drives the REAL
- *  conversation composer — same draft, same send path, same attachments. */
+/** One mirrored composer attachment (image → previewUrl, file → name only). */
+export interface CanvasComposerAttachment {
+    id: string;
+    kind: 'image' | 'file';
+    name: string;
+    previewUrl?: string;
+}
+/** The mirrored slice of the conversation composer the canvas input box shows:
+ *  the SAME draft, attachments, reference chips, and phase as the real composer,
+ *  so both views always agree and sending fires exactly one message. */
+export interface CanvasComposerSnapshot {
+    draft: string;
+    attachments: readonly CanvasComposerAttachment[];
+    occurrences: readonly string[];
+    phase: 'plain' | 'adjudicating' | 'claimed' | 'submitting';
+    queueCount: number;
+}
+/** Live agent-composer face: the canvas's own bottom input box is a FULL view of
+ *  the real conversation composer — same draft, same send path, same attachments
+ *  (bidirectionally synced via subscribe/getSnapshot). */
 export interface CanvasComposer {
+    /** Read the current mirrored composer state. */
+    getSnapshot(): CanvasComposerSnapshot;
+    /** Subscribe to composer-state changes (returns an unsubscribe). */
+    subscribe(cb: () => void): () => void;
     /** Replace the conversation draft (persisted to the real composer). */
     setDraft(text: string): void;
     /** Register files as real composer attachments (image → thumbnail, other → file). */
     attachFiles(files: File[]): boolean;
+    /** Remove one composer attachment. */
+    removeAttachment(id: string): boolean;
     /** Send the current draft + attachments through the normal composer path. */
     submit(): void;
 }

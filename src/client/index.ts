@@ -52,7 +52,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { CanvasState, CanvasNode, JsonValue } from '../model.ts'
 import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasUpdateNodeRequest } from '../types.ts'
 import { CanvasView } from './CanvasView.tsx'
-import type { CanvasUploadedAsset } from './CanvasView.tsx'
+import type { CanvasUploadedAsset, CanvasComposerSnapshot } from './CanvasView.tsx'
 import { CanvasPanelButton } from './CanvasPanelButton.tsx'
 import { CanvasFooterButton } from './CanvasFooterButton.tsx'
 import { IMAGE_PRESETS, MUSIC_PRESETS, VIDEO_PRESETS, resolvePickerModels } from './generate-models.ts'
@@ -108,11 +108,38 @@ interface CanvasConversationLike {
     for(actx: ClientContext): {
       setDraft(text: string): void
       addAttachments(ids: readonly string[]): boolean
+      removeAttachment(id: string): boolean
       submit(): void
+      readonly state: {
+        getSnapshot(): CanvasInputState
+        subscribe(cb: () => void): () => void
+      }
     }
   }
   /** Register browser-owned draft attachments (image → thumbnail, other → file). */
   createDrafts?(sessionId: SessionId, files: readonly File[]): readonly { id: string }[]
+  /** Resolve ordered attachment ids back to live descriptors (image previewUrl). */
+  resolveDraftAttachments?(ids: readonly string[]): readonly CanvasDraftAttachment[]
+}
+
+/** The slice of InputState the canvas composer mirrors (structural; the real
+ *  InputState carries more, but these are what the composer renders). */
+interface CanvasInputState {
+  readonly draft: string
+  readonly attachmentIds: readonly string[]
+  readonly occurrences: readonly { readonly label: string }[]
+  readonly phase: 'plain' | 'adjudicating' | 'claimed' | 'submitting'
+  readonly queue: readonly unknown[]
+}
+
+/** A live draft attachment descriptor (structural mirror of ComposerAttachment). */
+interface CanvasDraftAttachment {
+  readonly kind: 'image' | 'file'
+  readonly id: string
+  readonly file: File
+  readonly previewUrl?: string
+  readonly width?: number
+  readonly height?: number
 }
 
 /** One Remote result, the wire shape the generated remote-client returns. */
@@ -385,18 +412,27 @@ function createCanvasFace(ctx: ClientContext) {
     }
     // Resolve the conversation composer input on demand (the session may not be
     // bound yet when the view first mounts). Returns the per-session SessionInput
-    // (setDraft / addAttachments / submit) that the canvas composer drives.
+    // (setDraft / addAttachments / submit / state) that the canvas composer drives.
     const composerInputOf = (): {
       setDraft(text: string): void
       addAttachments(ids: readonly string[]): boolean
+      removeAttachment(id: string): boolean
       submit(): void
+      readonly state: { getSnapshot(): CanvasInputState; subscribe(cb: () => void): () => void }
     } => {
       const conversation = ctx.get('conversation') as CanvasConversationLike | undefined
       const actx = (ctx.get('sessions') as CanvasSessionsLike | undefined)?.scope(sessionId)
       if (conversation?.input === undefined || actx === undefined) {
         throw new Error('canvas: 当前环境不支持 agent 输入框')
       }
-      return conversation.input.for(actx)
+      return conversation.input.for(actx) as unknown as ReturnType<typeof composerInputOf>
+    }
+    // Resolve live attachment descriptors for the given ids (image previewUrl /
+    // file name) from the conversation service.
+    const resolveComposerAttachments = (ids: readonly string[]): readonly CanvasDraftAttachment[] => {
+      const conversation = ctx.get('conversation') as CanvasConversationLike | undefined
+      if (conversation?.resolveDraftAttachments === undefined) return []
+      return conversation.resolveDraftAttachments(ids)
     }
     return {
       loadImage: async (ref: CanvasReadAssetRequest): Promise<string> => {
@@ -544,6 +580,34 @@ function createCanvasFace(ctx: ClientContext) {
         },
       },
       compose: {
+        getSnapshot: (): CanvasComposerSnapshot => {
+          try {
+            const input = composerInputOf()
+            const state = input.state.getSnapshot()
+            const attachments = resolveComposerAttachments(state.attachmentIds).map((a) => ({
+              id: a.id,
+              kind: a.kind,
+              name: a.file.name,
+              ...(a.previewUrl !== undefined ? { previewUrl: a.previewUrl } : {}),
+            }))
+            return {
+              draft: state.draft,
+              attachments,
+              occurrences: state.occurrences.map((o) => o.label),
+              phase: state.phase,
+              queueCount: state.queue.length,
+            }
+          } catch {
+            return { draft: '', attachments: [], occurrences: [], phase: 'plain', queueCount: 0 }
+          }
+        },
+        subscribe: (cb: () => void): (() => void) => {
+          try {
+            return composerInputOf().state.subscribe(cb)
+          } catch {
+            return () => {}
+          }
+        },
         setDraft: (text: string): void => {
           composerInputOf().setDraft(text)
         },
@@ -555,6 +619,9 @@ function createCanvasFace(ctx: ClientContext) {
           const drafts = conversation.createDrafts(sessionId, files)
           if (drafts.length === 0) return false
           return composerInputOf().addAttachments(drafts.map((d) => d.id))
+        },
+        removeAttachment: (id: string): boolean => {
+          return composerInputOf().removeAttachment(id)
         },
         submit: (): void => {
           composerInputOf().submit()
