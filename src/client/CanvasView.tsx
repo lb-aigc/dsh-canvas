@@ -475,12 +475,24 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
   const connectSourceRef = useRef<string | null>(null)
   // Right-click node context menu (删除 / 复制 / 添加至输入框), in screen px.
   const [nodeMenu, setNodeMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null)
+  // Optimistic edge targets: nodes whose solid link is still in-flight (the
+  // node is written, the edge not yet confirmed by the Host). The reconcile
+  // below keeps their optimistic edge until the authoritative state connects them.
+  const pendingLinkTargets = useRef<Set<string>>(new Set())
 
   // Reconcile local flow state from the projection (authoritative) on every change.
   useEffect(() => {
     if (canvas !== undefined) {
       setFlowNodes(toFlowNodes(canvas))
-      setFlowEdges(toFlowEdges(canvas))
+      setFlowEdges((prev) => {
+        const authoritative = toFlowEdges(canvas)
+        const confirmed = new Set(authoritative.map((e) => e.target))
+        // Keep optimistic edges whose link is still in-flight: the target node
+        // exists but the Host has not written the edge yet. Once the authority
+        // connects that target, the optimistic edge is dropped for the real one.
+        const optimistic = prev.filter((e) => pendingLinkTargets.current.has(e.target) && !confirmed.has(e.target))
+        return [...authoritative, ...optimistic]
+      })
     }
   }, [canvas])
 
@@ -734,21 +746,47 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
   // and released on empty canvas opens the menu; picking 图片/视频 creates a
   // BLANK downstream node (no upload) and wires it to the source with a solid
   // edge — the ComfyUI-style "chain a next step" flow.
-  const addDownstream = async (kind: 'image' | 'video'): Promise<void> => {
+  const addDownstream = (kind: 'image' | 'video'): void => {
     if (menu === null || menu.sourceNodeId === undefined) return
     const { flowX, flowY, sourceNodeId } = menu
     const id = newId()
     const label = kind === 'image' ? '图片' : '视频'
-    try {
-      await addNode({ id, kind, label, x: flowX, y: flowY })
-      await link({ source: sourceNodeId, target: id })
-      setWritebackError(null)
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error)
-      console.error('[ldd-canvas] add downstream failed:', error)
-      setWritebackError(`创建节点失败: ${msg}`)
-    }
+    // Optimistic: close the menu + dashed ghost IMMEDIATELY and paint the node
+    // + solid edge on the very next frame. The two write-backs each round-trip
+    // to the Host (~1s combined); awaiting them before clearing the menu is
+    // exactly the lag the user sees. The projection refresh reconciles after.
     setMenu(null)
+    setFlowNodes((nds) => [...nds, {
+      id,
+      type: kind,
+      position: { x: flowX, y: flowY },
+      data: { label, kind },
+    }])
+    setFlowEdges((eds) => [...eds, {
+      id: `opt-${id}`,
+      source: sourceNodeId,
+      target: id,
+      type: 'default',
+    }])
+    pendingLinkTargets.current.add(id)
+    // Persist in order (the target node must exist before the edge lands).
+    void (async () => {
+      try {
+        await addNode({ id, kind, label, x: flowX, y: flowY })
+        await link({ source: sourceNodeId, target: id })
+        pendingLinkTargets.current.delete(id)
+        setWritebackError(null)
+      } catch (error) {
+        pendingLinkTargets.current.delete(id)
+        // Roll back the optimistic node + edge: the write never landed, so the
+        // local-only draft must not linger (the projection refresh won't have it).
+        setFlowNodes((nds) => nds.filter((n) => n.id !== id))
+        setFlowEdges((eds) => eds.filter((e) => e.target !== id))
+        const msg = error instanceof Error ? error.message : String(error)
+        console.error('[ldd-canvas] add downstream failed:', error)
+        setWritebackError(`创建节点失败: ${msg}`)
+      }
+    })()
   }
 
   // Drag-and-drop upload: files dropped on the canvas become cards at the drop
