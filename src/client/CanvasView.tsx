@@ -334,11 +334,17 @@ function VariantGridItem({ variant, index, isPrimary, onSetPrimary }: {
       .catch(() => { if (!cancelled) setSrc(null) })
     return () => { cancelled = true }
   }, [variant, loadImage])
+  // Keep each variant at its own aspect ratio so the expanded grid shows the
+  // FULL frame (no square crop); the container reserves that ratio pre-load so
+  // the grid doesn't reflow once the image arrives.
+  const w = typeof variant.width === 'number' && variant.width > 0 ? variant.width : undefined
+  const h = typeof variant.height === 'number' && variant.height > 0 ? variant.height : undefined
+  const ratio = w !== undefined && h !== undefined ? `${w} / ${h}` : '1 / 1'
   return (
     <div className="ldd-canvas-image-grid-item">
       {src !== null
-        ? <img className="ldd-canvas-image-grid-img" src={src} alt={`变体 ${index + 1}`} />
-        : <div className="ldd-canvas-image-grid-placeholder">{kindIcon('image')}</div>}
+        ? <img className="ldd-canvas-image-grid-img" src={src} alt={`变体 ${index + 1}`} style={{ aspectRatio: ratio }} />
+        : <div className="ldd-canvas-image-grid-placeholder" style={{ aspectRatio: ratio }}>{kindIcon('image')}</div>}
       <button
         type="button"
         className={isPrimary ? 'ldd-canvas-image-set-primary ldd-canvas-image-set-primary--active nodrag' : 'ldd-canvas-image-set-primary nodrag'}

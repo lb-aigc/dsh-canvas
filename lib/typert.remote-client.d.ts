@@ -4,7 +4,7 @@ import type {
   TypertRemoteContribution,
 } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasState, CanvasUpdateNodeRequest } from '@ldd/dsh-canvas/types'
+import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasSetPrimaryVariantRequest, CanvasState, CanvasUpdateNodeRequest } from '@ldd/dsh-canvas/types'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$63616e766173 {
@@ -15,6 +15,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     readAsset: (sessionId: SessionId, request: CanvasReadAssetRequest) => Promise<RemoteResult<CanvasReadAssetValue>>
     removeNode: (sessionId: SessionId, nodeId: string) => Promise<RemoteResult<CanvasState>>
     saveAsset: (sessionId: SessionId, request: CanvasSaveAssetRequest) => Promise<RemoteResult<CanvasSaveAssetValue>>
+    setPrimaryVariant: (sessionId: SessionId, request: CanvasSetPrimaryVariantRequest) => Promise<RemoteResult<CanvasState>>
     updateNode: (sessionId: SessionId, nodeId: string, patch: CanvasUpdateNodeRequest) => Promise<RemoteResult<CanvasState>>
   }
   interface TypertRemoteMap {
@@ -25,6 +26,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'canvas/readAsset': (sessionId: SessionId, request: CanvasReadAssetRequest) => Promise<RemoteResult<CanvasReadAssetValue>>
     'canvas/removeNode': (sessionId: SessionId, nodeId: string) => Promise<RemoteResult<CanvasState>>
     'canvas/saveAsset': (sessionId: SessionId, request: CanvasSaveAssetRequest) => Promise<RemoteResult<CanvasSaveAssetValue>>
+    'canvas/setPrimaryVariant': (sessionId: SessionId, request: CanvasSetPrimaryVariantRequest) => Promise<RemoteResult<CanvasState>>
     'canvas/updateNode': (sessionId: SessionId, nodeId: string, patch: CanvasUpdateNodeRequest) => Promise<RemoteResult<CanvasState>>
   }
   interface TypertRemoteNamespaceMap {
