@@ -603,11 +603,21 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
   // node is written, the edge not yet confirmed by the Host). The reconcile
   // below keeps their optimistic edge until the authoritative state connects them.
   const pendingLinkTargets = useRef<Set<string>>(new Set())
+  // Live selected-node ids, fed by React Flow's onSelectionChange. The context
+  // menu reads this (not rfRef.getNodes()) — getNodes() returns the store
+  // snapshot whose `selected` flag can lag one frame behind a box-select, which
+  // made the batch "添加 N 张图片" menu miss its targets.
+  const selectedNodeIdsRef = useRef<Set<string>>(new Set())
+  // Nodes deleted locally whose removeNode write-back is still in flight. The
+  // projection reconcile must NOT resurrect them while the Host is catching up
+  // (that resurrection is the "press Backspace several times to delete" bug).
+  const pendingRemovalsRef = useRef<Set<string>>(new Set())
 
   // Reconcile local flow state from the projection (authoritative) on every change.
   useEffect(() => {
     if (canvas !== undefined) {
-      setFlowNodes(toFlowNodes(canvas))
+      const removals = pendingRemovalsRef.current
+      setFlowNodes(toFlowNodes(canvas).filter((n) => !removals.has(n.id)))
       setFlowEdges((prev) => {
         const authoritative = toFlowEdges(canvas)
         const confirmed = new Set(authoritative.map((e) => e.target))
@@ -737,10 +747,23 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     // the next projection refresh (e.g. a moveNode), and its url still trips
     // placeAssets' dedup → the same image can't be dropped back in.
     for (const change of changes) {
-      if (change.type === 'remove') run('removeNode', removeNode(change.id))
+      if (change.type === 'remove') {
+        // Mark it in-flight so the projection reconcile (which can fire from an
+        // unrelated Host append BEFORE this removeNode lands) does not resurrect
+        // the node mid-delete — that round-trip lag is the "delete has delay and
+        // needs several Backspace presses" symptom.
+        pendingRemovalsRef.current.add(change.id)
+        void removeNode(change.id)
+          .catch((error: unknown) => {
+            const msg = error instanceof Error ? error.message : String(error)
+            console.error('[ldd-canvas] removeNode failed:', error)
+            setWritebackError(`removeNode: ${msg}`)
+          })
+          .finally(() => { pendingRemovalsRef.current.delete(change.id) })
+      }
     }
     setFlowNodes((nds) => applyNodeChanges(changes, nds))
-  }, [removeNode, run])
+  }, [removeNode])
 
   const onEdgesChange = useCallback((changes: Parameters<typeof applyEdgeChanges>[0]) => {
     setFlowEdges((eds) => applyEdgeChanges(changes, eds))
@@ -1042,18 +1065,18 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
   const onNodeContextMenu = useCallback((event: ReactMouseEvent, node: Node): void => {
     event.preventDefault()
     setMenu(null)
-    // Collect the currently-selected image node ids (React Flow marks selected
-    // nodes via `selected: true` on the flow node). If the right-clicked node is
-    // itself part of that selection, the batch covers the whole group.
-    const selectedImages = (rfRef.current?.getNodes() ?? [])
-      .filter((n: Node) => n.selected === true && n.type === 'image')
-      .map((n: Node) => n.id)
-    const inSelection = selectedImages.includes(node.id)
-    const imageIds = inSelection && selectedImages.length > 0
+    // Batch target = every selected image node. The right-click itself selects
+    // the node under the cursor, so if the clicked node is NOT yet part of the
+    // selection (a lone right-click), the batch is just that one node.
+    const selected = selectedNodeIdsRef.current
+    const selectedImages = (canvas?.nodes ?? [])
+      .filter((n: CanvasNode) => selected.has(n.id) && n.kind === 'image')
+      .map((n: CanvasNode) => n.id)
+    const imageIds = selectedImages.length > 0
       ? selectedImages
       : (node.type === 'image' ? [node.id] : [])
     setNodeMenu({ x: event.clientX, y: event.clientY, nodeId: node.id, imageIds })
-  }, [])
+  }, [canvas])
 
   // Delete a node from the context menu (same write-back as the × button).
   const deleteNodeById = (nodeId: string): void => {
@@ -1126,6 +1149,9 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
             onConnectStart={onConnectStart}
             onConnectEnd={onConnectEnd}
             onNodeContextMenu={onNodeContextMenu}
+            onSelectionChange={({ nodes }) => {
+              selectedNodeIdsRef.current = new Set(nodes.map((n: Node) => n.id))
+            }}
             // Wider connection hit radius: a link can start anywhere within this
             // many screen px of a handle, so the user need not land dead-center.
             connectionRadius={36}

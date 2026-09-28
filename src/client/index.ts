@@ -533,7 +533,34 @@ function createCanvasFace(ctx: ClientContext) {
           await writeText(`[图片] ${node.label}`)
           return
         }
-        await navigator.clipboard.write([new ClipboardItem({ [saved.mediaType]: blob })])
+        // Chromium's ClipboardItem supports image/png (universal) and image/webp
+        // (Chrome 76+); image/jpeg is NOT supported and throws "Type image/jpeg
+        // not supported on write". Transcode unsupported media types to png via
+        // a scratch canvas so 复制 works for every image the canvas holds.
+        const savedMediaType = saved.mediaType
+        if (savedMediaType === 'image/png' || savedMediaType === 'image/webp') {
+          await navigator.clipboard.write([new ClipboardItem({ [savedMediaType]: blob })])
+          return
+        }
+        let pngBlob: Blob
+        try {
+          const bitmap = await createImageBitmap(blob)
+          const canvas = document.createElement('canvas')
+          canvas.width = bitmap.width
+          canvas.height = bitmap.height
+          const ctx = canvas.getContext('2d')
+          if (ctx === null) throw new Error('no 2d context')
+          ctx.drawImage(bitmap, 0, 0)
+          bitmap.close()
+          pngBlob = await new Promise<Blob>((resolve, reject) => {
+            canvas.toBlob((b) => (b === null ? reject(new Error('toBlob null')) : resolve(b)), 'image/png')
+          })
+        } catch {
+          // Transcode failed (e.g. no createImageBitmap) — degrade to text.
+          await writeText(`[图片] ${node.label}`)
+          return
+        }
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })])
       },
       downloadNodeImage: async (node: CanvasNode): Promise<void> => {
         // Save an image node's durable bytes to disk through the Electron
