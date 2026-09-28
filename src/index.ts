@@ -252,6 +252,12 @@ interface TurnState {
    *  multi-variant stack). The first generated image fills/creates it; every
    *  subsequent generated image this turn appends as another variant. */
   variantNodeId: string | null
+  /** True once a "生成中…" placeholder has been requested this turn — either a
+   *  reference-image submit (Phase 1) or the first `generate_image` call
+   *  (Phase 1.5). Concurrent tool calls and the reference path all race
+   *  through microtasks, so this sync flag is what dedupes them into ONE
+   *  placeholder instead of one per call. */
+  placeholderRequested: boolean
 }
 
 const turnStates = new WeakMap<object, TurnState>()
@@ -471,7 +477,7 @@ export function apply(ctx: Context): void {
   //                           wired to the source (or detached, for text-only).
   ctx.on('session/event', (session, event) => {
     if (event.type === 'turn/start') {
-      turnStates.set(session, { refIds: new Set(), pendingNodeIds: [], variantNodeId: null })
+      turnStates.set(session, { refIds: new Set(), pendingNodeIds: [], variantNodeId: null, placeholderRequested: false })
       return
     }
     if (event.type === 'turn/end') {
@@ -506,8 +512,12 @@ export function apply(ctx: Context): void {
       if (!isRealUserMessage(event)) return
       const blocks = userImageBlocksOf(event)
       if (blocks.length === 0) return
-      const state = turnStates.get(session) ?? { refIds: new Set<string>(), pendingNodeIds: [], variantNodeId: null }
+      const state = turnStates.get(session) ?? { refIds: new Set<string>(), pendingNodeIds: [], variantNodeId: null, placeholderRequested: false }
       turnStates.set(session, state)
+      // A reference submit will hang its own placeholder in the deferred
+      // Phase 1 below — mark it now (synchronously) so a later `tool/call`
+      // in the same turn doesn't ALSO hang a second placeholder.
+      state.placeholderRequested = true
       // Defer out of the triggering append (see the tool/result comment below).
       queueMicrotask(() => {
         try {
@@ -604,6 +614,37 @@ export function apply(ctx: Context): void {
           if (next.nodes.length !== before.nodes.length) session.append('canvas/state', { state: next })
         } catch (error) {
           console.error('[ldd-canvas] auto-mirror (user/message) failed:', error)
+        }
+      })
+      return
+    }
+    // Phase 1.5 — a text-only generation submit has NO reference image, so
+    // Phase 1 (which keys off reference blocks) never hangs a placeholder. When
+    // the agent actually decides to generate (its `generate_image` tool/call),
+    // hang a single "生成中…" placeholder so the canvas shows the task is
+    // running even for pure text-to-image.
+    if (event.type === 'tool/call') {
+      const name = (event.data as { readonly name?: unknown }).name
+      if (name !== 'generate_image') return
+      const state = turnStates.get(session)
+      if (state === undefined || state.placeholderRequested) return
+      state.placeholderRequested = true
+      queueMicrotask(() => {
+        try {
+          let next = foldCanvas(session.snapshotEvents())
+          const auto = next.nodes.length
+          const placeholder = addNode(next, {
+            kind: 'image',
+            label: '生成中…',
+            x: (auto % 4) * 220,
+            y: Math.floor(auto / 4) * 180,
+            meta: { pending: true, autoPlace: true },
+          })
+          next = placeholder.state
+          state.pendingNodeIds.push(placeholder.node.id)
+          session.append('canvas/state', { state: next })
+        } catch (error) {
+          console.error('[ldd-canvas] auto-mirror (tool/call) failed:', error)
         }
       })
       return
