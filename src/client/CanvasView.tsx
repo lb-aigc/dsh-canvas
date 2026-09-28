@@ -554,14 +554,25 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
   const [flowNodes, setFlowNodes] = useState<Node[]>([])
   const [flowEdges, setFlowEdges] = useState<Edge[]>([])
 
-  // The canvas's own agent composer is a FULL VIEW of the real conversation
-  // composer: it subscribes to the underlying SessionInput state, so draft text,
-  // attachments, and reference chips stay bidirectionally in sync (typing here
-  // updates the conversation composer and vice versa; sending fires one message).
+  // The canvas's own agent composer mirrors the real conversation composer's
+  // ATTACHMENTS + reference chips live (they don't steal focus). The DRAFT TEXT
+  // is a local buffer: typing here only updates the local state, NOT the
+  // underlying Lexical editor — because SessionInput.setDraft() runs
+  // `root.clear() + root.selectEnd()`, which yanks the DOM focus into the
+  // conversation composer on every keystroke. The local draft is flushed into
+  // the real composer only on submit (and mirrored back only when the canvas
+  // textarea is NOT focused, so conversation-side typing still reaches it).
   const [composerSnap, setComposerSnap] = useState<CanvasComposerSnapshot>(() => compose.getSnapshot())
+  const [localDraft, setLocalDraft] = useState<string>(() => compose.getSnapshot().draft)
+  const composerFocusedRef = useRef(false)
   useEffect(() => {
-    setComposerSnap(compose.getSnapshot())
-    return compose.subscribe(() => { setComposerSnap(compose.getSnapshot()) })
+    const sync = (): void => {
+      const next = compose.getSnapshot()
+      setComposerSnap(next)
+      if (!composerFocusedRef.current) setLocalDraft(next.draft)
+    }
+    sync()
+    return compose.subscribe(sync)
   }, [compose])
   // Per-modality model dropdown state (re-read from the face on open; holds the
   // picked value for each controlled <select>).
@@ -747,6 +758,14 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     const target = connection.target
     if (source === null || target === null) return
     run('link', link({ source, target }))
+    // Manually wiring an image node into a downstream card is an explicit
+    // "use this as a reference" gesture. Mirror it into the composer input as a
+    // reference attachment, so the user does not have to right-click each source
+    // and pick 添加至输入框 one by one — the chain already says what to do.
+    const sourceNode = canvas?.nodes.find((n: CanvasNode) => n.id === source)
+    if (sourceNode !== undefined && sourceNode.kind === 'image') {
+      void addNodeToInput(sourceNode)
+    }
   }
 
   // Start of a dragged connection: remember the source node, so a release on
@@ -950,13 +969,15 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     event.stopPropagation()
   }
 
-  // The canvas's own agent composer — send the CURRENT conversation composer
-  // state (which this view mirrors). Draft + attachments already live in the
-  // underlying SessionInput; submit fires that exact single message.
+  // The canvas's own agent composer — flush the LOCAL draft into the real
+  // composer, then submit that exact single message. (Attachments already live
+  // in the underlying SessionInput via addNodeToInput / attachFiles.)
   const doComposeSubmit = (): void => {
-    const text = composerSnap.draft.trim()
+    const text = localDraft.trim()
     if (text === '' && composerSnap.attachments.length === 0) return
     try {
+      composerFocusedRef.current = false
+      if (localDraft !== composerSnap.draft) compose.setDraft(localDraft)
       compose.submit()
       setWritebackError(null)
     } catch (error) {
@@ -974,7 +995,9 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
   }
 
   const onComposeChange = (text: string): void => {
-    compose.setDraft(text)
+    // Local buffer only — do NOT setDraft on every keystroke (its selectEnd()
+    // steals focus into the conversation composer).
+    setLocalDraft(text)
   }
 
   const onComposeKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
@@ -1221,8 +1244,10 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
               </button>
               <textarea
                 className="ldd-canvas-composer-input"
-                value={composerSnap.draft}
+                value={localDraft}
                 onChange={(event) => onComposeChange(event.target.value)}
+                onFocus={() => { composerFocusedRef.current = true }}
+                onBlur={() => { composerFocusedRef.current = false }}
                 onKeyDown={onComposeKeyDown}
                 placeholder="给 agent 发送消息…（Enter 发送，Shift+Enter 换行）"
                 rows={1}
@@ -1231,7 +1256,7 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
                 type="button"
                 className="ldd-canvas-composer-send"
                 onClick={doComposeSubmit}
-                disabled={composerSnap.draft.trim() === '' && composerSnap.attachments.length === 0}
+                disabled={localDraft.trim() === '' && composerSnap.attachments.length === 0}
               >
                 发送
               </button>
