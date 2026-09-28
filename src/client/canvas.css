@@ -375,6 +375,26 @@
   stroke-width: 1.4;
 }
 
+/* Pending (生成中…) treatment: an accent-tinted placeholder with an animated
+ * spinner, shown on the pre-drawn blank card until the generated image fills it. */
+.ldd-canvas-image-pending {
+  color: var(--dsw-alias-accent, #6366f1);
+  border-bottom-color: var(--dsw-alias-accent, #6366f1);
+}
+
+.ldd-canvas-pending-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--dsw-alias-accent-soft, rgba(99, 102, 241, 0.25));
+  border-top-color: var(--dsw-alias-accent, #6366f1);
+  border-radius: 50%;
+  animation: ldd-canvas-spin 0.9s linear infinite;
+}
+
+@keyframes ldd-canvas-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ---- media (video/music) placeholder body ---- */
 .ldd-canvas-node-media {
   display: flex;

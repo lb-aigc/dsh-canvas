@@ -533,6 +533,11 @@ export function apply(ctx: Context): void {
         const before = foldCanvas(session.snapshotEvents())
         const state = turnStates.get(session)
         let next = before
+        // Track whether the canvas actually mutated. Filling a pending
+        // placeholder uses `updateNode` (url/meta change), which does NOT
+        // change node or edge COUNT — so a count-based append guard silently
+        // dropped the fill and the generated image never reached the canvas.
+        let changed = false
         for (const meta of metas) {
           if (next.nodes.some((node) => node.url === meta.attachmentId)) continue
           // Preferred: fill the oldest pending placeholder (its dashed chain
@@ -552,6 +557,7 @@ export function apply(ctx: Context): void {
                 ...(meta.bytes === undefined ? {} : { bytes: meta.bytes }),
               },
             })
+            changed = true
             continue
           }
           // Fallback: wire to the reference-image source node (image-to-image
@@ -574,14 +580,13 @@ export function apply(ctx: Context): void {
             },
           })
           next = result.state
+          changed = true
           if (source !== undefined) {
             const edgeResult = addEdge(next, { source: source.id, target: result.node.id })
             next = edgeResult.state
           }
         }
-        if (next.nodes.length !== before.nodes.length || next.edges.length !== before.edges.length) {
-          session.append('canvas/state', { state: next })
-        }
+        if (changed) session.append('canvas/state', { state: next })
       } catch (error) {
         // The session may have been disposed before the microtask ran; a failed
         // mirror must never take the session down.

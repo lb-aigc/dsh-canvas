@@ -310,6 +310,10 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
   const [previewOpen, setPreviewOpen] = useState(false)
   const sha = isShaAttachment(data.url)
   const fact = metaText(data.kind, data.meta)
+  // A pending node is the pre-drawn blank card awaiting a generated image
+  // (host auto-mirror hangs one per submit); it renders a "生成中…" treatment
+  // until the generated result fills it in place.
+  const isPending = data.meta?.pending === true
 
   useEffect(() => {
     const url = data.url
@@ -439,7 +443,14 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
             </div>
 
             {data.kind === 'image' && (
-              <div className="ldd-canvas-node-image ldd-canvas-image-placeholder" style={{ width: 240, height: 180 }}>{kindIcon('image')}图片</div>
+              <div
+                className={isPending ? 'ldd-canvas-node-image ldd-canvas-image-placeholder ldd-canvas-image-pending' : 'ldd-canvas-node-image ldd-canvas-image-placeholder'}
+                style={{ width: 240, height: 180 }}
+              >
+                {isPending
+                  ? <><span className="ldd-canvas-pending-spinner" aria-hidden="true" />生成中…</>
+                  : <>{kindIcon('image')}图片</>}
+              </div>
             )}
 
             {data.kind === 'video' && (
