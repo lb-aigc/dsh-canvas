@@ -353,7 +353,7 @@ function VariantGridItem({ variant, index, isPrimary, onSetPrimary }: {
 /** One node card: a head row (kind glyph + caption + meta fact) over a kind body. */
 function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
   const loadImage = useContext(LoadImageContext)
-  const { removeNode, downloadNodeImage, setPrimaryVariant } = useContext(CanvasActionsContext)
+  const { downloadNodeImage, setPrimaryVariant } = useContext(CanvasActionsContext)
   const [resolved, setResolved] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -476,20 +476,6 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
   return (
     <>
     <div className={isImage ? 'ldd-canvas-node ldd-canvas-node--image' : 'ldd-canvas-node'} data-kind={data.kind}>
-      <button
-        type="button"
-        className="ldd-canvas-node-delete nodrag"
-        title="删除节点"
-        aria-label={`删除「${data.label}」`}
-        onClick={(event) => {
-          event.stopPropagation()
-          removeNode(id)
-        }}
-      >
-        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
-          <path d="M3.5 4.5h9M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9M6.5 6.5v5M9.5 6.5v5" />
-        </svg>
-      </button>
 
       {isImage
         ? (

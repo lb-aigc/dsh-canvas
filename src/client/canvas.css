@@ -661,43 +661,7 @@
   right: -26px;
 }
 
-/* ---- node delete button (hover-revealed, top-right) ---- */
-.ldd-canvas-node-delete {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: none;
-  border-radius: 5px;
-  background: var(--dsw-alias-bg-layer-2);
-  color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
-}
-
-.ldd-canvas-node:hover .ldd-canvas-node-delete {
-  opacity: 1;
-}
-
-.ldd-canvas-node-delete:hover {
-  background: var(--dsw-alias-bg-layer-3, var(--dsw-alias-bg-layer-2));
-  color: var(--dsw-alias-danger, #ef4444);
-}
-
-.ldd-canvas-node-delete svg {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
+/* ---- node delete button removed: deletion lives in the right-click menu ---- */
 
 /* ---- empty-canvas hint (overlaid, non-blocking) ---- */
 .ldd-canvas-empty-hint {
