@@ -1165,6 +1165,18 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
 
   useEffect(() => { refreshModels() }, [refreshModels])
 
+  // Re-read the model dropdowns whenever a model switch is broadcast anywhere —
+  // the conversation composer's picker dispatches `dsh:generate-model-changed`
+  // (sessionId/kind/key) right after issuing `/generate-model`, and the face's
+  // override mirror is updated by its own `ctx.effect` listener. Without this,
+  // the canvas composer's DISPLAYED model only refreshed when its dropdown
+  // gained focus, so an agent-composer pick showed stale here until clicked.
+  useEffect(() => {
+    const onModelChanged = (): void => { refreshModels() }
+    window.addEventListener('dsh:generate-model-changed', onModelChanged)
+    return () => window.removeEventListener('dsh:generate-model-changed', onModelChanged)
+  }, [refreshModels])
+
   const actions = useMemo(() => ({
     removeNode: (nodeId: string) => {
       captureUndo(new Set([nodeId]))
