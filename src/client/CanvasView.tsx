@@ -1420,7 +1420,7 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
                     {att.previewUrl !== undefined
                       ? <img className="ldd-canvas-composer-thumb" src={att.previewUrl} alt={att.name} />
                       : null}
-                    {att.name}
+                    <span className="ldd-canvas-composer-chip-label">{att.name}</span>
                     <button
                       type="button"
                       className="ldd-canvas-composer-chip-remove"

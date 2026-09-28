@@ -938,6 +938,17 @@
   flex: 0 0 auto;
 }
 
+/* The file-name text inside a chip: shrinkable + ellipsized so a long name
+   truncates instead of shoving the × button past the chip's max-width (which
+   `overflow: hidden` then clipped, making the image un-removable). */
+.ldd-canvas-composer-chip-label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .ldd-canvas-composer-chip-remove:hover {
   background: var(--dsw-alias-bg-layer-3, var(--dsw-alias-bg-layer-2));
   color: var(--dsw-alias-danger, #ef4444);
