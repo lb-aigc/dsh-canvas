@@ -406,7 +406,6 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
               src={src}
               alt={data.label}
               style={{ width: displayW, height: displayH }}
-              onClick={() => { setPreviewOpen(true) }}
             />
             <div className="ldd-canvas-node-image-actions nodrag">
               <button
@@ -597,7 +596,9 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
   // The node a dragged connection left from (set onConnectStart, read+cleared onConnectEnd).
   const connectSourceRef = useRef<string | null>(null)
   // Right-click node context menu (删除 / 复制 / 添加至输入框), in screen px.
-  const [nodeMenu, setNodeMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null)
+  // `imageIds` carries every currently-selected image node when the right-click
+  // lands on a multi-selected group, so "添加至输入框" can batch-add them all.
+  const [nodeMenu, setNodeMenu] = useState<{ x: number; y: number; nodeId: string; imageIds: string[] } | null>(null)
   // Optimistic edge targets: nodes whose solid link is still in-flight (the
   // node is written, the edge not yet confirmed by the Host). The reconcile
   // below keeps their optimistic edge until the authoritative state connects them.
@@ -1035,11 +1036,23 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
   }), [removeNode, run, downloadNodeImage])
 
   // Right-click a node → context menu (删除 / 复制 / 添加至输入框). The browser's
-  // native context menu is suppressed so our menu owns the right-click.
+  // native context menu is suppressed so our menu owns the right-click. When the
+  // right-click lands on a multi-selected group of images, remember all of them
+  // so 添加至输入框 batches the whole selection.
   const onNodeContextMenu = useCallback((event: ReactMouseEvent, node: Node): void => {
     event.preventDefault()
     setMenu(null)
-    setNodeMenu({ x: event.clientX, y: event.clientY, nodeId: node.id })
+    // Collect the currently-selected image node ids (React Flow marks selected
+    // nodes via `selected: true` on the flow node). If the right-clicked node is
+    // itself part of that selection, the batch covers the whole group.
+    const selectedImages = (rfRef.current?.getNodes() ?? [])
+      .filter((n: Node) => n.selected === true && n.type === 'image')
+      .map((n: Node) => n.id)
+    const inSelection = selectedImages.includes(node.id)
+    const imageIds = inSelection && selectedImages.length > 0
+      ? selectedImages
+      : (node.type === 'image' ? [node.id] : [])
+    setNodeMenu({ x: event.clientX, y: event.clientY, nodeId: node.id, imageIds })
   }, [])
 
   // Delete a node from the context menu (same write-back as the × button).
@@ -1062,7 +1075,7 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     })
   }
 
-  // Put a node into the agent composer input box (image → thumbnail attachment,
+  // Put one node into the agent composer input box (image → thumbnail attachment,
   // text/note → draft text; media → `[类型] 标题`), without sending.
   const handleAddToInput = (nodeId: string): void => {
     const node: CanvasNode | undefined = canvas?.nodes.find((n: CanvasNode) => n.id === nodeId)
@@ -1072,6 +1085,22 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
       const msg = error instanceof Error ? error.message : String(error)
       setWritebackError(`添加到输入框失败: ${msg}`)
     })
+  }
+
+  // Batch-add every selected image to the composer as a reference (multi-image
+  // reference). Fires one addNodeToInput per node; each appends its attachment,
+  // so the whole selection lands in the input rail for a single many-to-one
+  // generation submit.
+  const handleAddSelectionToInput = (imageIds: string[]): void => {
+    setNodeMenu(null)
+    const nodes = (canvas?.nodes ?? []).filter((n: CanvasNode) => imageIds.includes(n.id) && n.kind === 'image')
+    if (nodes.length === 0) return
+    for (const node of nodes) {
+      void addNodeToInput(node).catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : String(error)
+        setWritebackError(`添加到输入框失败: ${msg}`)
+      })
+    }
   }
 
   return (
@@ -1170,7 +1199,15 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
             <div className="ldd-canvas-menu ldd-canvas-node-menu" style={{ left: nodeMenu.x, top: nodeMenu.y }}>
               <button type="button" onClick={() => { deleteNodeById(nodeMenu.nodeId) }}>删除</button>
               <button type="button" onClick={() => { copyNode(nodeMenu.nodeId) }}>复制</button>
-              <button type="button" onClick={() => { handleAddToInput(nodeMenu.nodeId) }}>添加至输入框</button>
+              {nodeMenu.imageIds.length > 1
+                ? (
+                  <button type="button" onClick={() => { handleAddSelectionToInput(nodeMenu.imageIds) }}>
+                    添加 {nodeMenu.imageIds.length} 张图片至输入框
+                  </button>
+                )
+                : (
+                  <button type="button" onClick={() => { handleAddToInput(nodeMenu.nodeId) }}>添加至输入框</button>
+                )}
             </div>
           )}
 

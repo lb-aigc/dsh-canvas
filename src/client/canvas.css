@@ -264,7 +264,9 @@
 /* Borderless image card: the picture is the card, rounded at its own corners. */
 .ldd-canvas-node-image--full {
   border-radius: 10px;
-  cursor: zoom-in;
+  /* Hand pointer (not zoom-in): single-click now just selects the node; the
+   * preview is opened via the hover toolbar's 预览 button, not by clicking. */
+  cursor: pointer;
 }
 
 /* Hover-revealed preview/download actions (the reference floating toolbar). */
@@ -595,10 +597,20 @@
   background: transparent;
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
+  /* The menu opens under a double-click's second click; keep that click from
+   * leaving a focus ring / :active tint on the first button (which reads as
+   * "all options selected"). Only an explicit hover highlights an item. */
+  outline: none;
 }
 
 .ldd-canvas-menu button:hover {
   background: var(--dsw-alias-bg-layer-2);
+}
+
+.ldd-canvas-menu button:focus,
+.ldd-canvas-menu button:focus-visible {
+  background: transparent;
+  outline: none;
 }
 
 /* Right-click node context menu reuses the floating menu geometry. */
