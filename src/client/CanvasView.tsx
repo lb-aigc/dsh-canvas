@@ -38,7 +38,7 @@ import {
 import type { Edge, FinalConnectionState, Node, NodeTypes, OnConnect, OnConnectStartParams, ReactFlowInstance } from '@xyflow/react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { newId } from '../model.ts'
-import type { CanvasNode, CanvasState, JsonValue } from '../model.ts'
+import type { CanvasEdge, CanvasNode, CanvasState, JsonValue } from '../model.ts'
 import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasUpdateNodeRequest } from '../types.ts'
 import './react-flow.css'
 import './canvas.css'
@@ -612,10 +612,19 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
   // projection reconcile must NOT resurrect them while the Host is catching up
   // (that resurrection is the "press Backspace several times to delete" bug).
   const pendingRemovalsRef = useRef<Set<string>>(new Set())
+  // Undo stack for accidental deletions: each entry snapshots the node(s) and
+  // their touching edges at delete time, so Ctrl+Z restores them (addNode back,
+  // then re-link the edges). Pushed on every delete entry-point; Ctrl+Z pops
+  // the most recent one.
+  const undoStack = useRef<Array<{ nodes: CanvasNode[]; edges: CanvasEdge[] }>>([])
+  // Latest projection, for the undo/delete capture (which runs inside
+  // useCallback closures that would otherwise hold a stale `canvas`).
+  const canvasRef = useRef<CanvasState | undefined>(undefined)
 
   // Reconcile local flow state from the projection (authoritative) on every change.
   useEffect(() => {
     if (canvas !== undefined) {
+      canvasRef.current = canvas
       const removals = pendingRemovalsRef.current
       setFlowNodes(toFlowNodes(canvas).filter((n) => !removals.has(n.id)))
       setFlowEdges((prev) => {
@@ -739,6 +748,70 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     })
   }, [])
 
+  // Snapshot the given node ids (+ their touching edges) onto the undo stack
+  // BEFORE they are deleted, so Ctrl+Z can restore them. Reads the latest
+  // projection via canvasRef (safe from useCallback stale-closure).
+  const captureUndo = useCallback((nodeIds: Set<string>): void => {
+    const state = canvasRef.current
+    if (state === undefined || nodeIds.size === 0) return
+    const nodes = state.nodes.filter((n: CanvasNode) => nodeIds.has(n.id))
+    if (nodes.length === 0) return
+    const edges = state.edges.filter((e: CanvasEdge) => nodeIds.has(e.source) || nodeIds.has(e.target))
+    undoStack.current.push({ nodes, edges })
+    // Bound the stack so a long editing session can't grow it unboundedly.
+    if (undoStack.current.length > 100) undoStack.current.shift()
+  }, [])
+
+  // Restore the most recent deletion: addNode each captured node back (with its
+  // original id), then re-link the captured edges. Fire-and-forget; the
+  // projection refresh reconciles (and a failure surfaces in the error banner).
+  const undoDelete = useCallback((): void => {
+    const item = undoStack.current.pop()
+    if (item === undefined) return
+    void (async () => {
+      try {
+        for (const node of item.nodes) {
+          await addNode({
+            id: node.id,
+            kind: node.kind,
+            label: node.label,
+            x: node.x,
+            y: node.y,
+            ...(node.content === undefined ? {} : { content: node.content }),
+            ...(node.url === undefined ? {} : { url: node.url }),
+            ...(node.meta === undefined ? {} : { meta: node.meta }),
+          })
+        }
+        for (const edge of item.edges) {
+          await link({ source: edge.source, target: edge.target, ...(edge.label === undefined || edge.label === '' ? {} : { label: edge.label }) }).catch(() => {})
+        }
+        setWritebackError(null)
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error)
+        console.error('[ldd-canvas] undo delete failed:', error)
+        setWritebackError(`撤销删除失败: ${msg}`)
+      }
+    })()
+  }, [addNode, link])
+
+  // Ctrl/Cmd+Z restores the most recent deletion, but only when the keyboard
+  // focus is NOT in a text field (the composer textarea / contenteditable owns
+  // its own text undo there). Reads document.activeElement to disambiguate.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && (event.key === 'z' || event.key === 'Z')) {
+        const active = document.activeElement
+        const tag = active === null ? '' : (active.tagName ?? '').toLowerCase()
+        const editable = tag === 'textarea' || tag === 'input' || (active as HTMLElement | null)?.isContentEditable === true
+        if (editable) return
+        event.preventDefault()
+        undoDelete()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [undoDelete])
+
   const onNodesChange = useCallback((changes: Parameters<typeof applyNodeChanges>[0]) => {
     // React Flow's keyboard delete (Backspace/Delete on a selected node) lands
     // here as a `remove` change — it does NOT go through the × button / edit-bar
@@ -746,24 +819,30 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     // authoritative; otherwise the node only vanishes locally, then resurrects on
     // the next projection refresh (e.g. a moveNode), and its url still trips
     // placeAssets' dedup → the same image can't be dropped back in.
+    const removeIds = new Set<string>()
     for (const change of changes) {
-      if (change.type === 'remove') {
+      if (change.type === 'remove') removeIds.add(change.id)
+    }
+    if (removeIds.size > 0) {
+      // Snapshot for Ctrl+Z BEFORE the delete lands.
+      captureUndo(removeIds)
+      for (const id of removeIds) {
         // Mark it in-flight so the projection reconcile (which can fire from an
         // unrelated Host append BEFORE this removeNode lands) does not resurrect
         // the node mid-delete — that round-trip lag is the "delete has delay and
         // needs several Backspace presses" symptom.
-        pendingRemovalsRef.current.add(change.id)
-        void removeNode(change.id)
+        pendingRemovalsRef.current.add(id)
+        void removeNode(id)
           .catch((error: unknown) => {
             const msg = error instanceof Error ? error.message : String(error)
             console.error('[ldd-canvas] removeNode failed:', error)
             setWritebackError(`removeNode: ${msg}`)
           })
-          .finally(() => { pendingRemovalsRef.current.delete(change.id) })
+          .finally(() => { pendingRemovalsRef.current.delete(id) })
       }
     }
     setFlowNodes((nds) => applyNodeChanges(changes, nds))
-  }, [removeNode])
+  }, [removeNode, captureUndo])
 
   const onEdgesChange = useCallback((changes: Parameters<typeof applyEdgeChanges>[0]) => {
     setFlowEdges((eds) => applyEdgeChanges(changes, eds))
@@ -1031,6 +1110,29 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     }
   }
 
+  // Paste an image straight from the clipboard into the composer as a real
+  // attachment (the same intake as the attach button / drag-drop). Text paste
+  // falls through to the textarea's default behaviour.
+  const onComposePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    const items = Array.from(event.clipboardData?.items ?? [])
+    const files: File[] = []
+    for (const item of items) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file !== null) files.push(file)
+      }
+    }
+    if (files.length > 0) {
+      event.preventDefault()
+      try {
+        compose.attachFiles(files)
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error)
+        setWritebackError(`粘贴图片失败: ${msg}`)
+      }
+    }
+  }
+
   // Load the generation-model dropdown options (and the current selection) for
   // all three modalities from the injected face. Re-read on open so a settings
   // change or an external `/generate-model` pick is reflected.
@@ -1051,12 +1153,13 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
 
   const actions = useMemo(() => ({
     removeNode: (nodeId: string) => {
+      captureUndo(new Set([nodeId]))
       run('removeNode', removeNode(nodeId))
     },
     downloadNodeImage: (node: CanvasNode) => {
       run('downloadNodeImage', downloadNodeImage(node))
     },
-  }), [removeNode, run, downloadNodeImage])
+  }), [removeNode, run, downloadNodeImage, captureUndo])
 
   // Right-click a node → context menu (删除 / 复制 / 添加至输入框). The browser's
   // native context menu is suppressed so our menu owns the right-click. When the
@@ -1080,6 +1183,7 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
 
   // Delete a node from the context menu (same write-back as the × button).
   const deleteNodeById = (nodeId: string): void => {
+    captureUndo(new Set([nodeId]))
     run('removeNode', removeNode(nodeId))
     setNodeMenu(null)
   }
@@ -1104,7 +1208,12 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     const node: CanvasNode | undefined = canvas?.nodes.find((n: CanvasNode) => n.id === nodeId)
     if (node === undefined) return
     setNodeMenu(null)
-    void addNodeToInput(node).catch((error: unknown) => {
+    void addNodeToInput(node).then(() => {
+      // Force a composer refresh so the canvas input box shows the new reference
+      // thumbnail immediately (belt-and-braces on top of compose.subscribe).
+      setComposerSnap(compose.getSnapshot())
+      setLocalDraft(compose.getSnapshot().draft)
+    }).catch((error: unknown) => {
       const msg = error instanceof Error ? error.message : String(error)
       setWritebackError(`添加到输入框失败: ${msg}`)
     })
@@ -1118,12 +1227,13 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     setNodeMenu(null)
     const nodes = (canvas?.nodes ?? []).filter((n: CanvasNode) => imageIds.includes(n.id) && n.kind === 'image')
     if (nodes.length === 0) return
-    for (const node of nodes) {
-      void addNodeToInput(node).catch((error: unknown) => {
-        const msg = error instanceof Error ? error.message : String(error)
-        setWritebackError(`添加到输入框失败: ${msg}`)
-      })
-    }
+    void Promise.all(nodes.map((node: CanvasNode) => addNodeToInput(node))).then(() => {
+      setComposerSnap(compose.getSnapshot())
+      setLocalDraft(compose.getSnapshot().draft)
+    }).catch((error: unknown) => {
+      const msg = error instanceof Error ? error.message : String(error)
+      setWritebackError(`添加到输入框失败: ${msg}`)
+    })
   }
 
   return (
@@ -1312,6 +1422,7 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
                 onFocus={() => { composerFocusedRef.current = true }}
                 onBlur={() => { composerFocusedRef.current = false }}
                 onKeyDown={onComposeKeyDown}
+                onPaste={onComposePaste}
                 placeholder="给 agent 发送消息…（Enter 发送，Shift+Enter 换行）"
                 rows={1}
               />

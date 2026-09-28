@@ -469,13 +469,15 @@ function createCanvasFace(ctx: ClientContext) {
           const bytes = typeof node.meta?.['bytes'] === 'number' ? node.meta.bytes : undefined
           const width = typeof node.meta?.['width'] === 'number' ? node.meta.width : undefined
           const height = typeof node.meta?.['height'] === 'number' ? node.meta.height : undefined
+          // Diagnostic: a canvas image node MUST carry its full durable ref
+          // (url + mediaType + bytes + width + height) for the read-back. A
+          // missing field means the node was written without the read channel's
+          // metadata — surface it loudly instead of silently degrading to text.
           if (mediaType === undefined || bytes === undefined || width === undefined || height === undefined) {
-            input.setDraft(`[图片] ${node.label}`)
-            return
+            throw new Error(`canvas: 图片节点缺少元数据（url=${String(node.url)} mediaType=${String(mediaType)} bytes=${String(bytes)} width=${String(width)} height=${String(height)}）`)
           }
           if (conversation.createDrafts === undefined) {
-            input.setDraft(`[图片] ${node.label}`)
-            return
+            throw new Error('canvas: 当前环境不支持附件草稿（createDrafts 不可用）')
           }
           const saved = unwrap(await remoteOf().readAsset(sessionId, {
             attachmentId: node.url!,
@@ -487,8 +489,9 @@ function createCanvasFace(ctx: ClientContext) {
           const blob = new Blob([raw.buffer], { type: saved.mediaType })
           const file = new File([blob], `${node.label}.${extOf(saved.mediaType)}`, { type: saved.mediaType })
           const drafts = conversation.createDrafts(sessionId, [file])
-          if (drafts.length === 0) return
-          input.addAttachments(drafts.map((d) => d.id))
+          if (drafts.length === 0) throw new Error('canvas: 附件草稿创建失败（createDrafts 返回空）')
+          const added = input.addAttachments(drafts.map((d) => d.id))
+          if (!added) throw new Error('canvas: 附件添加被拒绝（输入框非空闲状态）')
           return
         }
         const text = node.kind === 'text' || node.kind === 'note'
