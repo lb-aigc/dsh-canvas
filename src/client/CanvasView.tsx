@@ -985,6 +985,20 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     const { flowX, flowY, sourceNodeId } = menu
     const id = newId()
     const label = kind === 'image' ? '图片' : '视频'
+    // Mirror the source into the composer as a reference — creating a blank
+    // downstream node off an image is the same explicit "use this as reference"
+    // gesture as wiring directly to one, and it's the root cause behind "only
+    // the LAST wired image lands in the input" (the first image was wired here,
+    // during node creation, where the mirror was missing).
+    const sourceNode = canvas?.nodes.find((n: CanvasNode) => n.id === sourceNodeId)
+    if (sourceNode !== undefined && sourceNode.kind === 'image') {
+      void addNodeToInput(sourceNode).then(() => {
+        setComposerSnap(compose.getSnapshot())
+      }).catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : String(error)
+        setWritebackError(`添加到输入框失败: ${msg}`)
+      })
+    }
     // Optimistic: close the menu + dashed ghost IMMEDIATELY and paint the node
     // + solid edge on the very next frame. The two write-backs each round-trip
     // to the Host (~1s combined); awaiting them before clearing the menu is
@@ -1181,6 +1195,21 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     setNodeMenu({ x: event.clientX, y: event.clientY, nodeId: node.id, imageIds })
   }, [canvas])
 
+  // Right-click on the box-selection rect (when multiple nodes are selected)
+  // fires React Flow's onSelectionContextMenu — NOT onNodeContextMenu. Wire it
+  // to the same batch menu so "box-select several images → right-click → 添加 N
+  // 张图片至输入框" works.
+  const onSelectionContextMenu = useCallback((event: ReactMouseEvent, nodes: Node[]): void => {
+    event.preventDefault()
+    setMenu(null)
+    const imageIds = nodes
+      .filter((n: Node) => n.type === 'image')
+      .map((n: Node) => n.id)
+    if (imageIds.length === 0) return
+    const nodeId = imageIds[0]!
+    setNodeMenu({ x: event.clientX, y: event.clientY, nodeId, imageIds })
+  }, [])
+
   // Delete a node from the context menu (same write-back as the × button).
   const deleteNodeById = (nodeId: string): void => {
     captureUndo(new Set([nodeId]))
@@ -1259,6 +1288,7 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
             onConnectStart={onConnectStart}
             onConnectEnd={onConnectEnd}
             onNodeContextMenu={onNodeContextMenu}
+            onSelectionContextMenu={onSelectionContextMenu}
             onSelectionChange={({ nodes }) => {
               selectedNodeIdsRef.current = new Set(nodes.map((n: Node) => n.id))
             }}
