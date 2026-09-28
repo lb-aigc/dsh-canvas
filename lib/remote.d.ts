@@ -19,7 +19,7 @@ import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import type { Context } from '@deepseek-ai/cordis';
 import type { SessionId } from '@deepseek-ai/dsh-session/types';
 import type { CanvasState } from './types.ts';
-import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasUpdateNodeRequest } from './types.ts';
+import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasSetPrimaryVariantRequest, CanvasUpdateNodeRequest } from './types.ts';
 export declare class CanvasService extends TypertRemoteService {
     static inject: string[];
     constructor(ctx: Context);
@@ -33,6 +33,10 @@ export declare class CanvasService extends TypertRemoteService {
     removeNode(sessionId: SessionId, nodeId: string): CanvasState;
     /** Patch one node's mutable fields; returns the full new canvas. */
     updateNode(sessionId: SessionId, nodeId: string, patch: CanvasUpdateNodeRequest): CanvasState;
+    /** Promote one variant of a multi-variant image node to primary (the surface
+     *  image that a downstream reference edge / download / copy resolves to).
+     *  Returns the full new canvas. */
+    setPrimaryVariant(sessionId: SessionId, request: CanvasSetPrimaryVariantRequest): CanvasState;
     /** Move a node (position-only convenience; returns the full new canvas). */
     moveNode(sessionId: SessionId, nodeId: string, x: number, y: number): CanvasState;
     /** Link two nodes; returns the full new canvas. */

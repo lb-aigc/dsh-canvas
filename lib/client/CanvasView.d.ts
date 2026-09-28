@@ -10,6 +10,8 @@ export interface CanvasWriteback {
     updateNode(nodeId: string, patch: CanvasUpdateNodeRequest): Promise<CanvasState>;
     moveNode(nodeId: string, x: number, y: number): Promise<CanvasState>;
     link(request: CanvasLinkRequest): Promise<CanvasState>;
+    /** Promote one variant of a multi-variant image node to primary (surface). */
+    setPrimaryVariant(nodeId: string, variantIndex: number): Promise<CanvasState>;
 }
 /** One mirrored composer attachment (image → previewUrl, file → name only). */
 export interface CanvasComposerAttachment {
@@ -131,6 +133,7 @@ export interface CanvasViewProps {
     updateNode: CanvasWriteback['updateNode'];
     moveNode: CanvasWriteback['moveNode'];
     link: CanvasWriteback['link'];
+    setPrimaryVariant: CanvasWriteback['setPrimaryVariant'];
 }
-export declare function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeToClipboard, downloadNodeImage, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps): import("react").JSX.Element;
+export declare function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeToClipboard, downloadNodeImage, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link, setPrimaryVariant }: CanvasViewProps): import("react").JSX.Element;
 //# sourceMappingURL=CanvasView.d.ts.map

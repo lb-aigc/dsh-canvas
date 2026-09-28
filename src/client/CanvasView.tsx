@@ -38,7 +38,7 @@ import {
 import type { Edge, FinalConnectionState, Node, NodeTypes, OnConnect, OnConnectStartParams, ReactFlowInstance } from '@xyflow/react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { newId } from '../model.ts'
-import type { CanvasEdge, CanvasNode, CanvasState, JsonValue } from '../model.ts'
+import type { CanvasEdge, CanvasImageVariant, CanvasNode, CanvasState, JsonValue } from '../model.ts'
 import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasUpdateNodeRequest } from '../types.ts'
 import './react-flow.css'
 import './canvas.css'
@@ -54,6 +54,8 @@ export interface CanvasWriteback {
   updateNode(nodeId: string, patch: CanvasUpdateNodeRequest): Promise<CanvasState>
   moveNode(nodeId: string, x: number, y: number): Promise<CanvasState>
   link(request: CanvasLinkRequest): Promise<CanvasState>
+  /** Promote one variant of a multi-variant image node to primary (surface). */
+  setPrimaryVariant(nodeId: string, variantIndex: number): Promise<CanvasState>
 }
 
 /** One mirrored composer attachment (image → previewUrl, file → name only). */
@@ -184,6 +186,7 @@ export interface CanvasViewProps {
   updateNode: CanvasWriteback['updateNode']
   moveNode: CanvasWriteback['moveNode']
   link: CanvasWriteback['link']
+  setPrimaryVariant: CanvasWriteback['setPrimaryVariant']
 }
 
 const LoadImageContext = createContext<(ref: CanvasReadAssetRequest) => Promise<string>>(
@@ -191,9 +194,10 @@ const LoadImageContext = createContext<(ref: CanvasReadAssetRequest) => Promise<
 )
 
 /** Write-back actions reachable from deep inside a node card (the delete button). */
-const CanvasActionsContext = createContext<{ removeNode: (nodeId: string) => void; downloadNodeImage: (node: CanvasNode) => void }>({
+const CanvasActionsContext = createContext<{ removeNode: (nodeId: string) => void; downloadNodeImage: (node: CanvasNode) => void; setPrimaryVariant: (nodeId: string, variantIndex: number) => void }>({
   removeNode: () => {},
   downloadNodeImage: () => {},
+  setPrimaryVariant: () => {},
 })
 
 /** A node's `url` is either a `sha256:` attachment id or a plain http(s) url. */
@@ -211,6 +215,8 @@ interface CanvasNodeData {
   kind: CanvasNode['kind']
   content?: string
   url?: string
+  variants?: CanvasImageVariant[]
+  primaryIndex?: number
   meta?: Record<string, JsonValue>
 }
 
@@ -302,18 +308,67 @@ function metaText(kind: CanvasNode['kind'], meta: Record<string, JsonValue> | un
   return undefined
 }
 
+/** One image card inside a multi-variant node's expanded grid: loads the
+ *  variant's thumbnail through the canvas read channel and carries a
+ *  "设为主图" action (the primary variant shows a "主图" badge instead). */
+function VariantGridItem({ variant, index, isPrimary, onSetPrimary }: {
+  variant: CanvasImageVariant
+  index: number
+  isPrimary: boolean
+  onSetPrimary: (index: number) => void
+}) {
+  const loadImage = useContext(LoadImageContext)
+  const [src, setSrc] = useState<string | null>(null)
+  useEffect(() => {
+    const mediaType = variant.mediaType
+    const bytes = variant.bytes
+    const width = variant.width
+    const height = variant.height
+    if (mediaType === undefined || bytes === undefined || width === undefined || height === undefined) {
+      setSrc(null)
+      return
+    }
+    let cancelled = false
+    loadImage({ attachmentId: variant.attachmentId, mediaType, bytes, width, height })
+      .then((url) => { if (!cancelled) setSrc(url) })
+      .catch(() => { if (!cancelled) setSrc(null) })
+    return () => { cancelled = true }
+  }, [variant, loadImage])
+  return (
+    <div className="ldd-canvas-image-grid-item">
+      {src !== null
+        ? <img className="ldd-canvas-image-grid-img" src={src} alt={`变体 ${index + 1}`} />
+        : <div className="ldd-canvas-image-grid-placeholder">{kindIcon('image')}</div>}
+      <button
+        type="button"
+        className={isPrimary ? 'ldd-canvas-image-set-primary ldd-canvas-image-set-primary--active nodrag' : 'ldd-canvas-image-set-primary nodrag'}
+        onClick={(event) => { event.stopPropagation(); onSetPrimary(index) }}
+      >
+        {isPrimary ? '主图' : '设为主图'}
+      </button>
+    </div>
+  )
+}
+
 /** One node card: a head row (kind glyph + caption + meta fact) over a kind body. */
 function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
   const loadImage = useContext(LoadImageContext)
-  const { removeNode, downloadNodeImage } = useContext(CanvasActionsContext)
+  const { removeNode, downloadNodeImage, setPrimaryVariant } = useContext(CanvasActionsContext)
   const [resolved, setResolved] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const sha = isShaAttachment(data.url)
   const fact = metaText(data.kind, data.meta)
   // A pending node is the pre-drawn blank card awaiting a generated image
   // (host auto-mirror hangs one per submit); it renders a "生成中…" treatment
   // until the generated result fills it in place.
   const isPending = data.meta?.pending === true
+  // A multi-variant node collapses N generated images into one card: a primary
+  // surface image + an expandable grid of siblings. Single-image nodes keep the
+  // plain `url` shape (no variants array, or a one-element one).
+  const variants = data.variants ?? []
+  const isMulti = data.kind === 'image' && variants.length > 1
+  const primaryIndex = typeof data.primaryIndex === 'number' && data.primaryIndex >= 0 ? data.primaryIndex : 0
 
   useEffect(() => {
     const url = data.url
@@ -380,6 +435,44 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
     ...(data.meta !== undefined ? { meta: data.meta } : {}),
   })
 
+  // Promote a variant to the surface image, then collapse back to the stack
+  // (the reference / download / copy channels all follow `url`, so the surface
+  // image is the one a downstream edge resolves to).
+  const handleSetPrimary = (variantIndex: number): void => {
+    setPrimaryVariant(id, variantIndex)
+    setExpanded(false)
+  }
+
+  // Hover-revealed preview/download actions, shared by single-image and
+  // multi-variant (stacked) surfaces.
+  const imageActions = (
+    <div className="ldd-canvas-node-image-actions nodrag">
+      <button
+        type="button"
+        title="预览"
+        aria-label={`预览「${data.label}」`}
+        onClick={() => { setPreviewOpen(true) }}
+      >
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+          <path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z" />
+          <circle cx="8" cy="8" r="2" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        title="下载"
+        aria-label={`下载「${data.label}」`}
+        onClick={() => {
+          downloadNodeImage(fullNode())
+        }}
+      >
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+          <path d="M8 2.5v7M5 6.5l3 3 3-3M3 12.5h10" />
+        </svg>
+      </button>
+    </div>
+  )
+
   return (
     <>
     <div className={isImage ? 'ldd-canvas-node ldd-canvas-node--image' : 'ldd-canvas-node'} data-kind={data.kind}>
@@ -400,39 +493,62 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
 
       {isImage
         ? (
-          <>
-            <img
-              className="ldd-canvas-node-image ldd-canvas-node-image--full"
-              src={src}
-              alt={data.label}
-              style={{ width: displayW, height: displayH }}
-            />
-            <div className="ldd-canvas-node-image-actions nodrag">
-              <button
-                type="button"
-                title="预览"
-                aria-label={`预览「${data.label}」`}
-                onClick={() => { setPreviewOpen(true) }}
-              >
-                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
-                  <path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z" />
-                  <circle cx="8" cy="8" r="2" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                title="下载"
-                aria-label={`下载「${data.label}」`}
-                onClick={() => {
-                  downloadNodeImage(fullNode())
-                }}
-              >
-                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
-                  <path d="M8 2.5v7M5 6.5l3 3 3-3M3 12.5h10" />
-                </svg>
-              </button>
-            </div>
-          </>
+          isMulti
+            ? (
+              expanded
+                ? (
+                  <div className="ldd-canvas-image-grid nodrag">
+                    <div className="ldd-canvas-image-grid-head">
+                      <span className="ldd-canvas-image-grid-title">{variants.length} 张变体</span>
+                      <button type="button" className="ldd-canvas-image-count" title="收起" onClick={() => setExpanded(false)}>
+                        {variants.length}
+                        <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true" focusable="false"><path d="M3 10l5-5 5 5" /></svg>
+                      </button>
+                    </div>
+                    <div className="ldd-canvas-image-grid-body">
+                      {variants.map((v, i) => (
+                        <VariantGridItem
+                          key={v.attachmentId}
+                          variant={v}
+                          index={i}
+                          isPrimary={i === primaryIndex}
+                          onSetPrimary={handleSetPrimary}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )
+                : (
+                  <div className="ldd-canvas-image-stack">
+                    <div className="ldd-canvas-image-stack-layers" aria-hidden="true">
+                      <span style={{ width: displayW, height: displayH }} />
+                      <span style={{ width: displayW, height: displayH }} />
+                    </div>
+                    <img
+                      className="ldd-canvas-node-image ldd-canvas-node-image--full"
+                      src={src}
+                      alt={data.label}
+                      style={{ width: displayW, height: displayH }}
+                    />
+                    <button type="button" className="ldd-canvas-image-count nodrag" title={`${variants.length} 张变体，点击展开`} onClick={() => setExpanded(true)}>
+                      {variants.length}
+                      <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true" focusable="false"><path d="M3 6l5 5 5-5" /></svg>
+                    </button>
+                    {imageActions}
+                  </div>
+                )
+            )
+            : (
+              <>
+                <img
+                  className="ldd-canvas-node-image ldd-canvas-node-image--full"
+                  src={src}
+                  alt={data.label}
+                  style={{ width: displayW, height: displayH }}
+                />
+                {imageActions}
+              </>
+            )
         )
         : (
           <>
@@ -529,7 +645,7 @@ function toFlowNodes(state: CanvasState): Node[] {
     id: n.id,
     type: n.kind,
     position: { x: n.x, y: n.y },
-    data: { label: n.label, kind: n.kind, content: n.content, url: n.url, meta: n.meta },
+    data: { label: n.label, kind: n.kind, content: n.content, url: n.url, variants: n.variants, primaryIndex: n.primaryIndex, meta: n.meta },
   }))
 }
 
@@ -544,7 +660,7 @@ function toFlowEdges(state: CanvasState): Edge[] {
   }))
 }
 
-export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeToClipboard, downloadNodeImage, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link }: CanvasViewProps) {
+export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeToClipboard, downloadNodeImage, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link, setPrimaryVariant }: CanvasViewProps) {
   const canvas = useProjection('canvas')
 
   // Local, RESPONSIVE flow state: the projection is the authoritative mirror,
@@ -779,6 +895,8 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
             y: node.y,
             ...(node.content === undefined ? {} : { content: node.content }),
             ...(node.url === undefined ? {} : { url: node.url }),
+            ...(node.variants === undefined ? {} : { variants: node.variants }),
+            ...(node.primaryIndex === undefined ? {} : { primaryIndex: node.primaryIndex }),
             ...(node.meta === undefined ? {} : { meta: node.meta }),
           })
         }
@@ -1185,7 +1303,10 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     downloadNodeImage: (node: CanvasNode) => {
       run('downloadNodeImage', downloadNodeImage(node))
     },
-  }), [removeNode, run, downloadNodeImage, captureUndo])
+    setPrimaryVariant: (nodeId: string, variantIndex: number) => {
+      run('setPrimaryVariant', setPrimaryVariant(nodeId, variantIndex))
+    },
+  }), [removeNode, run, downloadNodeImage, setPrimaryVariant, captureUndo])
 
   // Right-click a node → context menu (删除 / 复制 / 添加至输入框). The browser's
   // native context menu is suppressed so our menu owns the right-click. When the

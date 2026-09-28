@@ -314,6 +314,155 @@
   stroke-linejoin: round;
 }
 
+/* ---- multi-variant image node (stack + expand grid) ---- */
+
+/* Stacked surface: the primary image sits over faint offset "sibling" cards so
+   a multi-image node reads as a stack, ComfyUI-style. */
+.ldd-canvas-image-stack {
+  position: relative;
+  display: inline-block;
+}
+
+.ldd-canvas-image-stack-layers {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.ldd-canvas-image-stack-layers span {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+.ldd-canvas-image-stack-layers span:nth-child(1) { transform: translate(6px, 6px); }
+.ldd-canvas-image-stack-layers span:nth-child(2) { transform: translate(12px, 12px); }
+
+/* The primary surface image sits above the offset layers. */
+.ldd-canvas-image-stack .ldd-canvas-node-image--full {
+  position: relative;
+  z-index: 1;
+}
+
+/* The count button (top-right): "N ▾" — expand/collapse the variant stack. */
+.ldd-canvas-image-count {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.ldd-canvas-image-count:hover {
+  background: rgba(0, 0, 0, 0.78);
+}
+
+.ldd-canvas-image-count svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Expanded grid: N variants in a 2-column grid with a "设为主图" action each. */
+.ldd-canvas-image-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  background: var(--dsw-alias-bg-layer-2);
+  border-radius: 10px;
+  min-width: 240px;
+  max-width: 380px;
+}
+
+.ldd-canvas-image-grid-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ldd-canvas-image-grid-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.ldd-canvas-image-grid-head .ldd-canvas-image-count {
+  position: static;
+}
+
+.ldd-canvas-image-grid-body {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.ldd-canvas-image-grid-item {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.ldd-canvas-image-grid-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  aspect-ratio: 1 / 1;
+}
+
+.ldd-canvas-image-grid-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1 / 1;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.ldd-canvas-image-set-primary {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 2px 7px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.ldd-canvas-image-set-primary:hover {
+  background: rgba(0, 0, 0, 0.78);
+}
+
+.ldd-canvas-image-set-primary--active {
+  background: rgba(99, 102, 241, 0.85);
+  cursor: default;
+}
+
 /* ---- image preview lightbox (portal, full-screen) ---- */
 .ldd-canvas-lightbox {
   position: fixed;

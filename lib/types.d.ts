@@ -9,8 +9,8 @@
  *
  * @module @ldd/dsh-canvas/types
  */
-import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasState, JsonValue } from './model.ts';
-export type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasState, JsonValue };
+import type { CanvasEdge, CanvasImageVariant, CanvasNode, CanvasNodeKind, CanvasState, JsonValue } from './model.ts';
+export type { CanvasEdge, CanvasImageVariant, CanvasNode, CanvasNodeKind, CanvasState, JsonValue };
 /** New-node input for {@link CanvasService.addNode}. */
 export interface CanvasAddNodeRequest {
     /** Caller-supplied id (optional). Lets the client build node+edge in one
@@ -22,6 +22,8 @@ export interface CanvasAddNodeRequest {
     y?: number;
     content?: string;
     url?: string;
+    variants?: CanvasImageVariant[];
+    primaryIndex?: number;
     meta?: Record<string, JsonValue>;
 }
 /** New-edge input for {@link CanvasService.link}. */
@@ -36,7 +38,17 @@ export interface CanvasUpdateNodeRequest {
     x?: number;
     y?: number;
     content?: string;
+    url?: string;
+    variants?: CanvasImageVariant[];
+    primaryIndex?: number;
     meta?: Record<string, JsonValue>;
+}
+/** Input to {@link CanvasService.setPrimaryVariant}: promote one variant of a
+ *  multi-variant image node to the surface (primary) image. */
+export interface CanvasSetPrimaryVariantRequest {
+    nodeId: string;
+    /** Index of the variant to promote within the node's `variants`. */
+    variantIndex: number;
 }
 /** One user-uploaded asset to store durably before it becomes a node. */
 export interface CanvasSaveAssetRequest {

@@ -12,6 +12,25 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
  *  or URL; text/note nodes carry inline content. */
 export type CanvasNodeKind = 'image' | 'video' | 'music' | 'text' | 'note'
 
+/** One image variant inside a multi-variant image node (a single
+ *  `generate_image` call that produced N images — count=4 → 4 variants). Each
+ *  variant is a complete, independently-loadable image reference, identical in
+ *  shape to the single-image `url`+`meta` fields the pre-variant model used. */
+export interface CanvasImageVariant {
+  /** Content-addressed attachment id (`sha256:...`). */
+  attachmentId: string
+  /** Verified media type of the stored image. */
+  mediaType?: string
+  /** Exact encoded byte length. */
+  bytes?: number
+  /** Normalized width in px. */
+  width?: number
+  /** Normalized height in px. */
+  height?: number
+  /** Original file name. */
+  name?: string
+}
+
 /** One node on the canvas. Stable across a session; persisted whole. */
 export interface CanvasNode {
   /** Stable id (uuid). */
@@ -26,6 +45,13 @@ export interface CanvasNode {
   attachmentId?: string
   /** Transient URL (not persisted — regenerated per session). */
   url?: string
+  /** All image variants of a multi-variant node, INCLUDING the primary. Absent
+   *  on single-image nodes (backward compatible: `url` alone still means one
+   *  image). */
+  variants?: CanvasImageVariant[]
+  /** Index of the primary (surface) variant within `variants`; the node's `url`
+   *  always mirrors this variant's `attachmentId`. Defaults to 0. */
+  primaryIndex?: number
   /** Per-kind metadata: width/height for image, duration/aspect for video, … */
   meta?: Record<string, JsonValue>
   /** Inline content for text/note nodes. */
@@ -94,11 +120,61 @@ export function addEdge(state: CanvasState, edge: Omit<CanvasEdge, 'id'> & { id?
 }
 
 /** Patch one node's mutable fields. Missing id is a no-op. */
-export function updateNode(state: CanvasState, nodeId: string, patch: Partial<Pick<CanvasNode, 'label' | 'x' | 'y' | 'content' | 'meta' | 'url'>>): CanvasState {
+export function updateNode(state: CanvasState, nodeId: string, patch: Partial<Pick<CanvasNode, 'label' | 'x' | 'y' | 'content' | 'meta' | 'url' | 'variants' | 'primaryIndex'>>): CanvasState {
   return {
     ...state,
     nodes: state.nodes.map((n) => (n.id === nodeId ? { ...n, ...patch } : n)),
   }
+}
+
+/** Promote one variant of a multi-variant node to primary. Updates the node's
+ *  `url` (to the variant's attachment id), `primaryIndex`, and the image
+ *  geometry meta (width/height/mediaType/bytes) so the read-back / reference /
+ *  download channels — which all key off `url` + `meta` — follow the new
+ *  surface image. A missing node or out-of-range index is a no-op. */
+export function setPrimaryVariant(state: CanvasState, nodeId: string, variantIndex: number): CanvasState {
+  return {
+    ...state,
+    nodes: state.nodes.map((n) => {
+      if (n.id !== nodeId) return n
+      const variants = n.variants ?? []
+      const variant = variants[variantIndex]
+      if (variant === undefined) return n
+      return {
+        ...n,
+        url: variant.attachmentId,
+        primaryIndex: variantIndex,
+        meta: {
+          ...(n.meta ?? {}),
+          ...(variant.mediaType === undefined ? {} : { mediaType: variant.mediaType }),
+          ...(variant.bytes === undefined ? {} : { bytes: variant.bytes }),
+          ...(variant.width === undefined ? {} : { width: variant.width }),
+          ...(variant.height === undefined ? {} : { height: variant.height }),
+        },
+      }
+    }),
+  }
+}
+
+/** The node's primary (surface) image variant, or undefined when it has none.
+ *  A single-image node exposes its `url`/`meta` as a one-element variant, so
+ *  callers that only need "the image to use as reference / download / copy"
+ *  always resolve through this without branching on multi vs single. */
+export function primaryVariantOf(node: CanvasNode): CanvasImageVariant | undefined {
+  const variants = node.variants ?? []
+  const idx = typeof node.primaryIndex === 'number' && node.primaryIndex >= 0 ? node.primaryIndex : 0
+  const variant = variants[idx]
+  if (variant !== undefined) return variant
+  if (node.url !== undefined && node.url !== '') {
+    return {
+      attachmentId: node.url,
+      ...(typeof node.meta?.['mediaType'] === 'string' ? { mediaType: node.meta['mediaType'] } : {}),
+      ...(typeof node.meta?.['bytes'] === 'number' ? { bytes: node.meta['bytes'] } : {}),
+      ...(typeof node.meta?.['width'] === 'number' ? { width: node.meta['width'] } : {}),
+      ...(typeof node.meta?.['height'] === 'number' ? { height: node.meta['height'] } : {}),
+    }
+  }
+  return undefined
 }
 
 /** Find one node by id. */

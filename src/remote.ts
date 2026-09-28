@@ -20,9 +20,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
-import { addEdge, addNode, emptyCanvas, removeNode, updateNode } from './model.ts'
+import { addEdge, addNode, emptyCanvas, removeNode, setPrimaryVariant, updateNode } from './model.ts'
 import type { CanvasNode, CanvasState } from './types.ts'
-import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasUpdateNodeRequest } from './types.ts'
+import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasSetPrimaryVariantRequest, CanvasUpdateNodeRequest } from './types.ts'
 
 /** Structural face of `ctx.attachments` (dsh-attachment). Shims the read/write
  *  entry points so this package does NOT add a dsh-attachment dependency edge
@@ -89,6 +89,8 @@ export class CanvasService extends TypertRemoteService {
       y: typeof request.y === 'number' ? request.y : Math.floor(auto / 4) * 180,
       ...(request.content === undefined ? {} : { content: request.content }),
       ...(request.url === undefined ? {} : { url: request.url }),
+      ...(request.variants === undefined ? {} : { variants: request.variants }),
+      ...(request.primaryIndex === undefined ? {} : { primaryIndex: request.primaryIndex }),
       ...(request.meta === undefined ? {} : { meta: request.meta }),
     })
     session.append('canvas/state', { state: next })
@@ -116,8 +118,23 @@ export class CanvasService extends TypertRemoteService {
       ...(patch.x === undefined ? {} : { x: patch.x }),
       ...(patch.y === undefined ? {} : { y: patch.y }),
       ...(patch.content === undefined ? {} : { content: patch.content }),
+      ...(patch.url === undefined ? {} : { url: patch.url }),
+      ...(patch.variants === undefined ? {} : { variants: patch.variants }),
+      ...(patch.primaryIndex === undefined ? {} : { primaryIndex: patch.primaryIndex }),
       ...(patch.meta === undefined ? {} : { meta: patch.meta }),
     })
+    session.append('canvas/state', { state: next })
+    return next
+  }
+
+  /** Promote one variant of a multi-variant image node to primary (the surface
+   *  image that a downstream reference edge / download / copy resolves to).
+   *  Returns the full new canvas. */
+  @Remote('setPrimaryVariant')
+  setPrimaryVariant(sessionId: SessionId, request: CanvasSetPrimaryVariantRequest): CanvasState {
+    const session = this.sessionOf(sessionId)
+    const before = foldCanvas(session.snapshotEvents())
+    const next = setPrimaryVariant(before, request.nodeId, request.variantIndex)
     session.append('canvas/state', { state: next })
     return next
   }

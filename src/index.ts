@@ -20,7 +20,7 @@ import { KNOWN_SESSION_EVENT_TYPES, type Session, type SessionEvent } from '@dee
 import type {} from '@deepseek-ai/dsh-session-projection'
 
 import { addEdge, addNode, emptyCanvas, removeNode, updateNode } from './model.ts'
-import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasState } from './model.ts'
+import type { CanvasEdge, CanvasImageVariant, CanvasNode, CanvasNodeKind, CanvasState } from './model.ts'
 import { registerCanvasSessionEvent } from './session-compat.ts'
 import { CanvasService } from './remote.ts'
 
@@ -56,6 +56,15 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
 // `as ZodType<X>` bridges zod's `.optional()` (`T | undefined`) to the
 // interface's `field?: T` under `exactOptionalPropertyTypes` (same idiom as
 // the goal package's projection schema).
+const canvasVariantSchema = zod.object({
+  attachmentId: zod.string(),
+  mediaType: zod.string().optional(),
+  bytes: zod.number().optional(),
+  width: zod.number().optional(),
+  height: zod.number().optional(),
+  name: zod.string().optional(),
+}).passthrough()
+
 const canvasNodeSchema = zod.object({
   id: zod.string(),
   kind: zod.enum(['image', 'video', 'music', 'text', 'note']),
@@ -64,6 +73,8 @@ const canvasNodeSchema = zod.object({
   y: zod.number(),
   attachmentId: zod.string().optional(),
   url: zod.string().optional(),
+  variants: zod.array(canvasVariantSchema).optional(),
+  primaryIndex: zod.number().optional(),
   meta: zod.record(zod.string(), zod.any()).optional(),
   content: zod.string().optional(),
 }) as ZodType<CanvasNode>
@@ -152,6 +163,19 @@ interface GeneratedImageMeta {
   name?: string
 }
 
+/** Convert a generated-image meta into a full image variant (identical field
+ *  set, just the model's named type). */
+function variantOf(meta: GeneratedImageMeta): CanvasImageVariant {
+  return {
+    attachmentId: meta.attachmentId,
+    ...(meta.mediaType === undefined ? {} : { mediaType: meta.mediaType }),
+    ...(meta.bytes === undefined ? {} : { bytes: meta.bytes }),
+    ...(meta.width === undefined ? {} : { width: meta.width }),
+    ...(meta.height === undefined ? {} : { height: meta.height }),
+    ...(meta.name === undefined ? {} : { name: meta.name }),
+  }
+}
+
 /** Recurse into a content-block array and collect every `image` block's
  *  attachment reference, descending through `tool-result` blocks (generate's
  *  `generate_image` renders images inside its tool result). */
@@ -232,10 +256,11 @@ function describeCanvas(state: CanvasState): string {
   if (state.nodes.length === 0) return '画布当前为空。'
   const nodes = state.nodes.map((n) => {
     const meta = n.meta === undefined || Object.keys(n.meta).length === 0 ? '' : ` ${JSON.stringify(n.meta)}`
+    const variantCount = n.variants !== undefined && n.variants.length > 1 ? ` 变体=${n.variants.length}` : ''
     const extra = n.kind === 'text' || n.kind === 'note'
       ? (n.content === undefined ? '' : ` 内容="${n.content.slice(0, 80)}"`)
       : ''
-    return `  - [${n.id}] ${KIND_LABEL[n.kind]} "${n.label}" @(${n.x},${n.y})${meta}${extra}`
+    return `  - [${n.id}] ${KIND_LABEL[n.kind]} "${n.label}" @(${n.x},${n.y})${variantCount}${meta}${extra}`
   }).join('\n')
   const edges = state.edges.length === 0
     ? '（无连线）'
@@ -571,33 +596,53 @@ export function apply(ctx: Context): void {
         // placeholder uses `updateNode` (url/meta change), which does NOT
         // change node or edge COUNT — so a count-based append guard silently
         // dropped the fill and the generated image never reached the canvas.
-        let changed = false
+        //
+        // Multiple metas in ONE event are the variants of a single
+        // `generate_image` call (count=N → N images). They collapse into ONE
+        // node as a multi-variant stack (primary surface + expandable siblings)
+        // rather than N separate cards.
+        const seen = new Set<string>()
+        const batch: GeneratedImageMeta[] = []
         for (const meta of metas) {
-          if (next.nodes.some((node) => node.url === meta.attachmentId)) continue
-          // Preferred: fill the oldest pending placeholder (its dashed chain
-          // turns into the real image in place).
-          const pendingId = state?.pendingNodeIds.shift()
-          const pending = pendingId !== undefined
-            ? next.nodes.find((node) => node.id === pendingId && node.meta?.pending === true)
-            : undefined
-          if (pending !== undefined) {
-            next = updateNode(next, pending.id, {
-              label: meta.name ?? '生成图片',
-              url: meta.attachmentId,
-              meta: {
-                ...(meta.width === undefined ? {} : { width: meta.width }),
-                ...(meta.height === undefined ? {} : { height: meta.height }),
-                ...(meta.mediaType === undefined ? {} : { mediaType: meta.mediaType }),
-                ...(meta.bytes === undefined ? {} : { bytes: meta.bytes }),
-              },
-            })
-            changed = true
-            continue
-          }
+          if (seen.has(meta.attachmentId)) continue
+          seen.add(meta.attachmentId)
+          const alreadyOnCanvas = next.nodes.some((node) =>
+            node.url === meta.attachmentId
+            || (node.variants?.some((v) => v.attachmentId === meta.attachmentId) ?? false),
+          )
+          if (alreadyOnCanvas) continue
+          batch.push(meta)
+        }
+        if (batch.length === 0) return
+        const primary = batch[0]!
+        const variants: CanvasImageVariant[] | undefined = batch.length > 1 ? batch.map(variantOf) : undefined
+        let changed = false
+
+        // Preferred: fill the oldest pending placeholder (its dashed chain
+        // turns into the real image in place), carrying all variants.
+        const pendingId = state?.pendingNodeIds.shift()
+        const pending = pendingId !== undefined
+          ? next.nodes.find((node) => node.id === pendingId && node.meta?.pending === true)
+          : undefined
+        if (pending !== undefined) {
+          next = updateNode(next, pending.id, {
+            label: primary.name ?? '生成图片',
+            url: primary.attachmentId,
+            ...(variants !== undefined ? { variants, primaryIndex: 0 } : {}),
+            meta: {
+              ...(primary.width === undefined ? {} : { width: primary.width }),
+              ...(primary.height === undefined ? {} : { height: primary.height }),
+              ...(primary.mediaType === undefined ? {} : { mediaType: primary.mediaType }),
+              ...(primary.bytes === undefined ? {} : { bytes: primary.bytes }),
+            },
+          })
+          changed = true
+        } else if (pendingId !== undefined) {
           // A pending id was claimed but its node is gone: the user deleted the
           // placeholder mid-generation. Honor that delete — do NOT hang a new
           // node (that was the "deleted card resurrects" bug).
-          if (pendingId !== undefined) continue
+          return
+        } else {
           // Fallback: wire to the reference-image source node (image-to-image
           // without a pre-created placeholder), or a detached auto-grid node.
           const source = state !== undefined && state.refIds.size > 0
@@ -606,15 +651,16 @@ export function apply(ctx: Context): void {
           const auto = next.nodes.length
           const result = addNode(next, {
             kind: 'image',
-            label: meta.name ?? '生成图片',
+            label: primary.name ?? '生成图片',
             x: source !== undefined ? source.x + 340 : (auto % 4) * 220,
             y: source !== undefined ? source.y : Math.floor(auto / 4) * 180,
-            url: meta.attachmentId,
+            url: primary.attachmentId,
+            ...(variants !== undefined ? { variants, primaryIndex: 0 } : {}),
             meta: {
-              ...(meta.width === undefined ? {} : { width: meta.width }),
-              ...(meta.height === undefined ? {} : { height: meta.height }),
-              ...(meta.mediaType === undefined ? {} : { mediaType: meta.mediaType }),
-              ...(meta.bytes === undefined ? {} : { bytes: meta.bytes }),
+              ...(primary.width === undefined ? {} : { width: primary.width }),
+              ...(primary.height === undefined ? {} : { height: primary.height }),
+              ...(primary.mediaType === undefined ? {} : { mediaType: primary.mediaType }),
+              ...(primary.bytes === undefined ? {} : { bytes: primary.bytes }),
             },
           })
           next = result.state
