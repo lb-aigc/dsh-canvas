@@ -442,12 +442,25 @@ function createCanvasFace(ctx: ClientContext) {
     // in dsh-client-ui-conversation). Remember url → draft ids so a disconnect can
     // withdraw exactly the drafts THIS canvas added, never a user's own upload.
     const referenceDrafts = new Map<string, Set<string>>()
+    // Cache decoded image bytes by attachmentId. BOTH the node thumbnail
+    // (loadImage) and the composer reference (addNodeToInput) fetch the SAME
+    // content-addressed attachment through readAsset — a 4K image round-trip
+    // there is the 2-3s lag between wiring a node and its reference appearing in
+    // the input box. Reuse the bytes so the second use is synchronous. Keyed by
+    // attachmentId (the node's sha256 url), which is content-addressed so a cache
+    // hit is always byte-identical.
+    const assetCache = new Map<string, { dataBase64: string; mediaType: string }>()
     return {
       loadImage: async (ref: CanvasReadAssetRequest): Promise<string> => {
         // Read through the canvas's own read channel (not session.readAttachment):
         // the latter requires the image to be a prompt image block in the session
         // log, but a canvas image is only referenced by its node url/meta.
-        const saved = unwrap(await remoteOf().readAsset(sessionId, ref), 'readAsset')
+        let saved = assetCache.get(ref.attachmentId)
+        if (saved === undefined) {
+          const res = unwrap(await remoteOf().readAsset(sessionId, ref), 'readAsset')
+          saved = { dataBase64: res.dataBase64, mediaType: res.mediaType }
+          assetCache.set(ref.attachmentId, saved)
+        }
         const binary = atob(saved.dataBase64)
         const bytes = new Uint8Array(binary.length)
         for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
@@ -487,10 +500,15 @@ function createCanvasFace(ctx: ClientContext) {
           if (conversation.createDrafts === undefined) {
             throw new Error('canvas: 当前环境不支持附件草稿（createDrafts 不可用）')
           }
-          const saved = unwrap(await remoteOf().readAsset(sessionId, {
-            attachmentId: node.url!,
-            mediaType, bytes, width, height,
-          }), 'readAsset')
+          let saved = assetCache.get(node.url!)
+          if (saved === undefined) {
+            const res = unwrap(await remoteOf().readAsset(sessionId, {
+              attachmentId: node.url!,
+              mediaType, bytes, width, height,
+            }), 'readAsset')
+            saved = { dataBase64: res.dataBase64, mediaType: res.mediaType }
+            assetCache.set(node.url!, saved)
+          }
           const binary = atob(saved.dataBase64)
           const raw = new Uint8Array(binary.length)
           for (let i = 0; i < binary.length; i += 1) raw[i] = binary.charCodeAt(i)
