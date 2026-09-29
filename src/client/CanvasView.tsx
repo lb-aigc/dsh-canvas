@@ -986,11 +986,35 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     const source = connection.source
     const target = connection.target
     if (source === null || target === null) return
-    run('link', link({ source, target }))
+    // Optimistic edge: paint the wire IMMEDIATELY, then persist. Without this the
+    // edge only appears after the Host writes back and the projection refreshes —
+    // the multi-second lag the user noticed. The pending-target set keeps this
+    // local edge alive until the authoritative state confirms it (reconcile below).
+    const optimisticId = `opt-${source}-${target}`
+    let alreadyLinked = false
+    setFlowEdges((eds) => {
+      if (eds.some((e) => e.source === source && e.target === target)) {
+        alreadyLinked = true
+        return eds
+      }
+      return [...eds, { id: optimisticId, source, target, type: 'default' }]
+    })
+    if (!alreadyLinked) pendingLinkTargets.current.add(target)
+    void link({ source, target }).then(() => {
+      pendingLinkTargets.current.delete(target)
+      setWritebackError(null)
+    }).catch((error: unknown) => {
+      pendingLinkTargets.current.delete(target)
+      setFlowEdges((eds) => eds.filter((e) => e.id !== optimisticId))
+      const msg = error instanceof Error ? error.message : String(error)
+      console.error('[ldd-canvas] link failed:', error)
+      setWritebackError(`连接失败: ${msg}`)
+    })
     // Manually wiring an image node into a downstream card is an explicit
     // "use this as a reference" gesture. Mirror it into the composer input as a
     // reference attachment, so the user does not have to right-click each source
     // and pick 添加至输入框 one by one — the chain already says what to do.
+    if (alreadyLinked) return
     const sourceNode = canvas?.nodes.find((n: CanvasNode) => n.id === source)
     if (sourceNode !== undefined && sourceNode.kind === 'image') {
       void addNodeToInput(sourceNode)
