@@ -669,9 +669,22 @@
    border instead of being cut in half by it. */
 .ldd-canvas-handle.react-flow__handle-left {
   left: -26px;
+  transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease, background 0.12s ease, box-shadow 0.15s ease, left 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .ldd-canvas-handle.react-flow__handle-right {
   right: -26px;
+  transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease, background 0.12s ease, box-shadow 0.15s ease, right 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* On hover the port also SHIFTS outward off the card — it "reaches out" to
+   meet the incoming connection, which both widens the hit target (easier to
+   land a wire) and reads as the endpoint lifting off the card. The slight
+   springy overshoot (cubic-bezier) gives it the tapnow-style pop. */
+.ldd-canvas-handle.react-flow__handle-left:hover {
+  left: -38px;
+}
+.ldd-canvas-handle.react-flow__handle-right:hover {
+  right: -38px;
 }
 
 /* ---- node delete button removed: deletion lives in the right-click menu ---- */
