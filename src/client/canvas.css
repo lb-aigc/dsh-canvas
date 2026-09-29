@@ -624,13 +624,18 @@
 .ldd-canvas-handle {
   width: 26px;
   height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
   background: transparent;
   border: none;
+  border-radius: 50%;
   box-shadow: none;
   opacity: 1;
+  flex-shrink: 0;
 }
 
 /* An enlarged, invisible hit area (extends past the visible ring on all sides)
@@ -648,6 +653,11 @@
 .ldd-canvas-handle-ring {
   width: 26px;
   height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  box-sizing: border-box;
+  aspect-ratio: 1 / 1;
+  flex-shrink: 0;
   border: 2.5px solid var(--dsw-alias-label-secondary);
   border-radius: 50%;
   background: var(--dsw-alias-bg-layer-1);

@@ -119,6 +119,13 @@ export function addEdge(state: CanvasState, edge: Omit<CanvasEdge, 'id'> & { id?
   return { state: { ...state, edges: [...state.edges, added] }, edge: added }
 }
 
+/** Remove one edge by id (a deliberate disconnect). Missing id is a no-op
+ *  returning the same state. */ 
+export function removeEdge(state: CanvasState, edgeId: string): CanvasState {
+  if (!state.edges.some((e) => e.id === edgeId)) return state
+  return { ...state, edges: state.edges.filter((e) => e.id !== edgeId) }
+}
+
 /** Patch one node's mutable fields. Missing id is a no-op. */
 export function updateNode(state: CanvasState, nodeId: string, patch: Partial<Pick<CanvasNode, 'label' | 'x' | 'y' | 'content' | 'meta' | 'url' | 'variants' | 'primaryIndex'>>): CanvasState {
   return {

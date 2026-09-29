@@ -54,6 +54,8 @@ export interface CanvasWriteback {
   updateNode(nodeId: string, patch: CanvasUpdateNodeRequest): Promise<CanvasState>
   moveNode(nodeId: string, x: number, y: number): Promise<CanvasState>
   link(request: CanvasLinkRequest): Promise<CanvasState>
+  /** Remove one edge (a deliberate disconnect by double-clicking the wire). */
+  unlink(edgeId: string): Promise<CanvasState>
   /** Promote one variant of a multi-variant image node to primary (surface). */
   setPrimaryVariant(nodeId: string, variantIndex: number): Promise<CanvasState>
 }
@@ -186,6 +188,7 @@ export interface CanvasViewProps {
   updateNode: CanvasWriteback['updateNode']
   moveNode: CanvasWriteback['moveNode']
   link: CanvasWriteback['link']
+  unlink: CanvasWriteback['unlink']
   setPrimaryVariant: CanvasWriteback['setPrimaryVariant']
 }
 
@@ -656,7 +659,7 @@ function toFlowEdges(state: CanvasState): Edge[] {
   }))
 }
 
-export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeToClipboard, downloadNodeImage, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link, setPrimaryVariant }: CanvasViewProps) {
+export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeToClipboard, downloadNodeImage, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link, unlink, setPrimaryVariant }: CanvasViewProps) {
   const canvas = useProjection('canvas')
 
   // Local, RESPONSIVE flow state: the projection is the authoritative mirror,
@@ -961,6 +964,15 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
   const onEdgesChange = useCallback((changes: Parameters<typeof applyEdgeChanges>[0]) => {
     setFlowEdges((eds) => applyEdgeChanges(changes, eds))
   }, [])
+
+  // Double-click a wire → deliberate disconnect. Remove the edge locally for
+  // instant feedback and persist the unlink (the projection refresh reconciles
+  // the authoritative state). This pairs with `edgesReconnectable`/`edgesFocusable`
+  // left at their defaults so hovering a wire shows the "cut" (scissors) affordance.
+  const onEdgeDoubleClick = useCallback((_event: ReactMouseEvent, edge: Edge): void => {
+    setFlowEdges((eds) => eds.filter((e) => e.id !== edge.id))
+    run('unlink', unlink(edge.id))
+  }, [unlink, run])
 
   if (canvas === undefined) {
     return <div className="ldd-canvas-empty">画布不可用（canvas 插件未挂载）。</div>
@@ -1424,14 +1436,13 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
             // Wider connection hit radius: a link can start anywhere within this
             // many screen px of a handle, so the user need not land dead-center.
             connectionRadius={36}
-            // Edges are NOT reconnectable and NOT keyboard-focusable: hovering an
-            // edge otherwise shows React Flow's reconnect anchors (the scissors /
-            // "cut" affordance) and lets a double-click / drag disconnect the edge.
-            // Connections are meaningful reference chains here, so an accidental
-            // disconnect is worse than no quick-disconnect at all. Deliberate
-            // rewiring can be done by deleting the node (right-click) and relinking.
-            edgesReconnectable={false}
-            edgesFocusable={false}
+            // Edges stay reconnectable + focusable at their React Flow defaults so
+            // hovering a wire shows the "cut" (scissors) affordance; a DOUBLE-CLICK
+            // deliberately disconnects (handled by `onEdgeDoubleClick`, which both
+            // removes the wire and persists the unlink). Disconnecting here is an
+            // explicit gesture, not an accidental drag — the persistence makes it a
+            // real state change instead of a local-only fade that refresh resurrects.
+            onEdgeDoubleClick={onEdgeDoubleClick}
             // Right-button drag pans the canvas; left-button drag on empty canvas
             // box-selects (normal pointer, not the grab hand), and left-dragging a
             // selected node moves the whole selection.

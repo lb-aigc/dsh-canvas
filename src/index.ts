@@ -19,7 +19,7 @@ import { KNOWN_SESSION_EVENT_TYPES, type Session, type SessionEvent } from '@dee
 // Type-only: resolves `ctx.sessionProjections` for the optional unit child.
 import type {} from '@deepseek-ai/dsh-session-projection'
 
-import { addEdge, addNode, emptyCanvas, primaryVariantOf, removeNode, updateNode } from './model.ts'
+import { addEdge, addNode, emptyCanvas, primaryVariantOf, removeEdge, removeNode, updateNode } from './model.ts'
 import type { CanvasEdge, CanvasImageVariant, CanvasNode, CanvasNodeKind, CanvasState } from './model.ts'
 import { registerCanvasSessionEvent } from './session-compat.ts'
 import { CanvasService } from './remote.ts'
@@ -441,7 +441,31 @@ function defineCanvasTools() {
     },
   })
 
-  return [inspectTool, addNodeTool, removeNodeTool, updateNodeTool, linkTool]
+  const unlinkTool = defineTool({
+    name: 'canvas_unlink',
+    description: '断开画布上的一条连线（删除这条连线，两端的节点都保留）。',
+    parameters: {
+      edgeId: { type: 'string', required: true, description: '要断开的连线 id（从 canvas_inspect 的连线列表获取）。' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { removed: { type: 'boolean', required: true } },
+      },
+      render: (_args, value) => [{ type: 'text', text: value.removed ? '已断开连线。' : '连线不存在（无变化）。' }],
+    },
+    isConcurrencySafe: () => true,
+    async execute(args, exec) {
+      const session = requireSession(exec)
+      const state = foldCanvas(session.snapshotEvents())
+      const next = removeEdge(state, args.edgeId)
+      session.append('canvas/state', { state: next })
+      return { removed: next !== state }
+    },
+  })
+
+  return [inspectTool, addNodeTool, removeNodeTool, updateNodeTool, linkTool, unlinkTool]
 }
 
 export function apply(ctx: Context): void {

@@ -94,6 +94,9 @@ export declare function addEdge(state: CanvasState, edge: Omit<CanvasEdge, 'id'>
     state: CanvasState;
     edge: CanvasEdge;
 };
+/** Remove one edge by id (a deliberate disconnect). Missing id is a no-op
+ *  returning the same state. */
+export declare function removeEdge(state: CanvasState, edgeId: string): CanvasState;
 /** Patch one node's mutable fields. Missing id is a no-op. */
 export declare function updateNode(state: CanvasState, nodeId: string, patch: Partial<Pick<CanvasNode, 'label' | 'x' | 'y' | 'content' | 'meta' | 'url' | 'variants' | 'primaryIndex'>>): CanvasState;
 /** Promote one variant of a multi-variant node to primary. Updates the node's

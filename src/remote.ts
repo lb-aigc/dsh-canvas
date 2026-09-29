@@ -20,9 +20,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
-import { addEdge, addNode, emptyCanvas, removeNode, setPrimaryVariant, updateNode } from './model.ts'
+import { addEdge, addNode, emptyCanvas, removeEdge, removeNode, setPrimaryVariant, updateNode } from './model.ts'
 import type { CanvasNode, CanvasState } from './types.ts'
-import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasSetPrimaryVariantRequest, CanvasUpdateNodeRequest } from './types.ts'
+import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasSetPrimaryVariantRequest, CanvasUnlinkRequest, CanvasUpdateNodeRequest } from './types.ts'
 
 /** Structural face of `ctx.attachments` (dsh-attachment). Shims the read/write
  *  entry points so this package does NOT add a dsh-attachment dependency edge
@@ -159,6 +159,16 @@ export class CanvasService extends TypertRemoteService {
       target: request.target,
       ...(request.label === undefined ? {} : { label: request.label }),
     })
+    session.append('canvas/state', { state: next })
+    return next
+  }
+
+  /** Unlink one edge (a deliberate disconnect); returns the full new canvas. */
+  @Remote('unlink')
+  unlink(sessionId: SessionId, request: CanvasUnlinkRequest): CanvasState {
+    const session = this.sessionOf(sessionId)
+    const before = foldCanvas(session.snapshotEvents())
+    const next = removeEdge(before, request.edgeId)
     session.append('canvas/state', { state: next })
     return next
   }

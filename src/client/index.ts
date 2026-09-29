@@ -50,7 +50,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 // sidebar.right.pane.tab seat declaration.
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { CanvasState, CanvasNode, JsonValue } from '../model.ts'
-import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasSetPrimaryVariantRequest, CanvasUpdateNodeRequest } from '../types.ts'
+import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasSetPrimaryVariantRequest, CanvasUnlinkRequest, CanvasUpdateNodeRequest } from '../types.ts'
 import { CanvasView } from './CanvasView.tsx'
 import type { CanvasUploadedAsset, CanvasComposerSnapshot } from './CanvasView.tsx'
 import { CanvasPanelButton } from './CanvasPanelButton.tsx'
@@ -156,6 +156,7 @@ interface CanvasRemoteNamespaceLike {
   updateNode(sessionId: string, nodeId: string, patch: CanvasUpdateNodeRequest): Promise<CanvasRemoteResult<CanvasState>>
   moveNode(sessionId: string, nodeId: string, x: number, y: number): Promise<CanvasRemoteResult<CanvasState>>
   link(sessionId: string, request: CanvasLinkRequest): Promise<CanvasRemoteResult<CanvasState>>
+  unlink(sessionId: string, request: CanvasUnlinkRequest): Promise<CanvasRemoteResult<CanvasState>>
   setPrimaryVariant(sessionId: string, request: CanvasSetPrimaryVariantRequest): Promise<CanvasRemoteResult<CanvasState>>
   inspect(sessionId: string): Promise<CanvasRemoteResult<CanvasState>>
   saveAsset(sessionId: string, request: CanvasSaveAssetRequest): Promise<CanvasRemoteResult<CanvasSaveAssetValue>>
@@ -672,6 +673,8 @@ function createCanvasFace(ctx: ClientContext) {
         unwrap(await remoteOf().moveNode(sessionId, nodeId, x, y), 'moveNode'),
       link: async (request: CanvasLinkRequest): Promise<CanvasState> =>
         unwrap(await remoteOf().link(sessionId, request), 'link'),
+      unlink: async (edgeId: string): Promise<CanvasState> =>
+        unwrap(await remoteOf().unlink(sessionId, { edgeId }), 'unlink'),
       setPrimaryVariant: async (nodeId: string, variantIndex: number): Promise<CanvasState> =>
         unwrap(await remoteOf().setPrimaryVariant(sessionId, { nodeId, variantIndex }), 'setPrimaryVariant'),
       pickFiles: async (kind?: 'image' | 'video' | 'music'): Promise<File[]> =>

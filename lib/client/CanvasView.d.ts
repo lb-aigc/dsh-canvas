@@ -10,6 +10,8 @@ export interface CanvasWriteback {
     updateNode(nodeId: string, patch: CanvasUpdateNodeRequest): Promise<CanvasState>;
     moveNode(nodeId: string, x: number, y: number): Promise<CanvasState>;
     link(request: CanvasLinkRequest): Promise<CanvasState>;
+    /** Remove one edge (a deliberate disconnect by double-clicking the wire). */
+    unlink(edgeId: string): Promise<CanvasState>;
     /** Promote one variant of a multi-variant image node to primary (surface). */
     setPrimaryVariant(nodeId: string, variantIndex: number): Promise<CanvasState>;
 }
@@ -133,7 +135,8 @@ export interface CanvasViewProps {
     updateNode: CanvasWriteback['updateNode'];
     moveNode: CanvasWriteback['moveNode'];
     link: CanvasWriteback['link'];
+    unlink: CanvasWriteback['unlink'];
     setPrimaryVariant: CanvasWriteback['setPrimaryVariant'];
 }
-export declare function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeToClipboard, downloadNodeImage, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link, setPrimaryVariant }: CanvasViewProps): import("react").JSX.Element;
+export declare function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeToClipboard, downloadNodeImage, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link, unlink, setPrimaryVariant }: CanvasViewProps): import("react").JSX.Element;
 //# sourceMappingURL=CanvasView.d.ts.map

@@ -32,6 +32,11 @@ export interface CanvasLinkRequest {
     target: string;
     label?: string;
 }
+/** Edge-removal input for {@link CanvasService.unlink}. */
+export interface CanvasUnlinkRequest {
+    /** Id of the edge to remove (a deliberate disconnect). */
+    edgeId: string;
+}
 /** Patch input for {@link CanvasService.updateNode}. */
 export interface CanvasUpdateNodeRequest {
     label?: string;

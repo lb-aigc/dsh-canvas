@@ -19,7 +19,7 @@ import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import type { Context } from '@deepseek-ai/cordis';
 import type { SessionId } from '@deepseek-ai/dsh-session/types';
 import type { CanvasState } from './types.ts';
-import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasSetPrimaryVariantRequest, CanvasUpdateNodeRequest } from './types.ts';
+import type { CanvasAddNodeRequest, CanvasLinkRequest, CanvasReadAssetRequest, CanvasReadAssetValue, CanvasSaveAssetRequest, CanvasSaveAssetValue, CanvasSetPrimaryVariantRequest, CanvasUnlinkRequest, CanvasUpdateNodeRequest } from './types.ts';
 export declare class CanvasService extends TypertRemoteService {
     static inject: string[];
     constructor(ctx: Context);
@@ -41,6 +41,8 @@ export declare class CanvasService extends TypertRemoteService {
     moveNode(sessionId: SessionId, nodeId: string, x: number, y: number): CanvasState;
     /** Link two nodes; returns the full new canvas. */
     link(sessionId: SessionId, request: CanvasLinkRequest): CanvasState;
+    /** Unlink one edge (a deliberate disconnect); returns the full new canvas. */
+    unlink(sessionId: SessionId, request: CanvasUnlinkRequest): CanvasState;
     /** Store one user-uploaded asset durably (image → normalized via `saveImage`,
      *  video/audio → verbatim via `saveFile`); returns its content-addressed
      *  attachment id (+ normalized image size). The client stores the id as the
