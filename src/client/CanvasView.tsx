@@ -1436,12 +1436,15 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
             // Wider connection hit radius: a link can start anywhere within this
             // many screen px of a handle, so the user need not land dead-center.
             connectionRadius={36}
-            // Edges stay reconnectable + focusable at their React Flow defaults so
-            // hovering a wire shows the "cut" (scissors) affordance; a DOUBLE-CLICK
-            // deliberately disconnects (handled by `onEdgeDoubleClick`, which both
-            // removes the wire and persists the unlink). Disconnecting here is an
-            // explicit gesture, not an accidental drag — the persistence makes it a
-            // real state change instead of a local-only fade that refresh resurrects.
+            // Edges are NOT reconnectable: React Flow's reconnect anchors (two
+            // transparent circles at the wire ends) intercept pointer events and
+            // make a fresh link land on the anchor instead of the handle — the
+            // "must connect twice" bug — and their cursor is `move`, not scissors.
+            // We deliberately disconnect via DOUBLE-CLICK instead (onEdgeDoubleClick
+            // removes the wire AND persists the unlink), and draw our OWN scissors
+            // cursor on edge hover (see canvas.css) so the cut affordance is clear
+            // without the reconnect machinery getting in the way.
+            edgesReconnectable={false}
             onEdgeDoubleClick={onEdgeDoubleClick}
             // Right-button drag pans the canvas; left-button drag on empty canvas
             // box-selects (normal pointer, not the grab hand), and left-dragging a

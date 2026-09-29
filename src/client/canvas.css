@@ -723,6 +723,16 @@
   right: -26px;
 }
 
+/* ---- edge "cut" affordance ---- */
+/* A selected wire shows a SCISSORS cursor: double-click cuts it (handled by
+   onEdgeDoubleClick, which removes the wire AND persists the unlink). We draw
+   our own scissors because React Flow's reconnect anchors are disabled — they
+   intercept fresh links (the "must connect twice" bug) and use a `move` cursor
+   instead of a cut affordance. */
+.react-flow__edge.selected {
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23000000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='6' cy='6' r='3'/><circle cx='6' cy='18' r='3'/><path d='M20 4 8.12 15.88'/><path d='M14.47 14.48 20 20'/><path d='M8.12 8.12 12 12'/></svg>") 12 12, crosshair;
+}
+
 /* ---- node delete button removed: deletion lives in the right-click menu ---- */
 
 /* ---- empty-canvas hint (overlaid, non-blocking) ---- */
