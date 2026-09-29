@@ -733,6 +733,14 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, removeNod
   // snapshot whose `selected` flag can lag one frame behind a box-select, which
   // made the batch "添加 N 张图片" menu miss its targets.
   const selectedNodeIdsRef = useRef<Set<string>>(new Set())
+  // Nodes being dragged RIGHT NOW (onNodeDragStart adds, onNodeDragStop clears).
+  // The reconcile below rewrites flowNodes from the authoritative projection on
+  // every projection change; a late confirmation from a PREVIOUS moveNode write
+  // (or any unrelated Host append) arriving MID-drag would otherwise stamp the
+  // dragging node back to its old position — the "drag one image, then the next
+  // one won't drag / jitters" symptom. Holding these ids lets the reconcile keep
+  // their local position instead of clobbering it.
+  const draggingNodeIds = useRef<Set<string>>(new Set())
   // Nodes deleted locally whose removeNode write-back is still in flight. The
   // projection reconcile must NOT resurrect them while the Host is catching up
   // (that resurrection is the "press Backspace several times to delete" bug).
@@ -751,7 +759,22 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, removeNod
     if (canvas !== undefined) {
       canvasRef.current = canvas
       const removals = pendingRemovalsRef.current
-      setFlowNodes(toFlowNodes(canvas).filter((n) => !removals.has(n.id)))
+      const dragging = draggingNodeIds.current
+      setFlowNodes((prev) => {
+        const authoritative = toFlowNodes(canvas).filter((n) => !removals.has(n.id))
+        // Preserve the local position of any node being dragged right now. A
+        // projection change firing MID-drag (a prior moveNode confirmation, an
+        // unrelated Host append) would otherwise snap the dragged node back to
+        // its pre-drag coordinates. Non-dragged nodes take the authoritative
+        // position normally, so external updates still land immediately.
+        if (dragging.size === 0) return authoritative
+        const localPos = new Map<string, { x: number; y: number }>()
+        for (const n of prev) localPos.set(n.id, n.position)
+        return authoritative.map((n) => {
+          const lp = localPos.get(n.id)
+          return dragging.has(n.id) && lp !== undefined ? { ...n, position: lp } : n
+        })
+      })
       setFlowEdges((prev) => {
         const authoritative = toFlowEdges(canvas)
         const confirmed = new Set(authoritative.map((e) => e.target))
@@ -1002,9 +1025,26 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, removeNod
     return <div className="ldd-canvas-empty">画布不可用（canvas 插件未挂载）。</div>
   }
 
-  const onDragStop = (_: unknown, node: Node): void => {
-    run('moveNode', moveNode(node.id, node.position.x, node.position.y))
-  }
+  const onNodeDragStart = useCallback((_event: unknown, node: Node): void => {
+    // Track every node that will move this drag: the grabbed node plus anything
+    // already selected (multi-select drags move the whole selection together).
+    const ids = new Set(selectedNodeIdsRef.current)
+    ids.add(node.id)
+    draggingNodeIds.current = ids
+  }, [])
+
+  const onNodeDragStop = useCallback((_event: unknown, node: Node, nodes: Node[]): void => {
+    const dragged = draggingNodeIds.current
+    draggingNodeIds.current = new Set()
+    // Persist the final position of EVERY dragged node, not just the grabbed one
+    // (a multi-select drag moves several cards; writing back only the grabbed
+    // node left the rest to snap back on the next reconcile).
+    for (const n of nodes) {
+      if (dragged.has(n.id)) {
+        run('moveNode', moveNode(n.id, n.position.x, n.position.y))
+      }
+    }
+  }, [moveNode, run])
 
   const onConnect: OnConnect = (connection) => {
     const source = connection.source
@@ -1475,7 +1515,8 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, removeNod
             onInit={(rf) => { rfRef.current = rf }}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
-            onNodeDragStop={onDragStop}
+            onNodeDragStart={onNodeDragStart}
+            onNodeDragStop={onNodeDragStop}
             onConnect={onConnect}
             onConnectStart={onConnectStart}
             onConnectEnd={onConnectEnd}
