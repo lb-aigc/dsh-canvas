@@ -613,8 +613,39 @@
 
 /* Handles are the link endpoints: a hollow ring with a ＋, brightening on hover
  * (the ComfyUI-style connection port). React Flow sizes/positions the handle at
- * the left/right vertical center; here we override its 6px solid dot. */
+ * the left/right vertical center; here we override its 6px solid dot.
+ *
+ * The `.ldd-canvas-handle` element is a STABLE, transparent hit target; the
+ * visible circle lives in the child `.ldd-canvas-handle-ring`. We animate the
+ * ring's `transform` (glow + outward reach) instead of the handle's `left/right`.
+ * Moving a CHILD via transform keeps the hover hit area fixed, so a cursor
+ * resting on the inner edge can't toggle `:hover` and make the port jitter
+ * ("接触不良" bounce) the way a `left/right` shift did. */
 .ldd-canvas-handle {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  opacity: 1;
+}
+
+/* An enlarged, invisible hit area (extends past the visible ring on all sides)
+ * so the port is easy to grab without the element itself moving. This is what
+ * genuinely widens the connection target; React Flow's `connectionRadius` only
+ * helps once a wire is already dragging. */
+.ldd-canvas-handle::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+}
+
+/* The visible connection ring: circle + plus that reads as the port. */
+.ldd-canvas-handle-ring {
   width: 26px;
   height: 26px;
   border: 2.5px solid var(--dsw-alias-label-secondary);
@@ -626,13 +657,13 @@
   justify-content: center;
   opacity: 0.55;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
-  transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease, background 0.12s ease, box-shadow 0.15s ease;
+  transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease, background 0.12s ease, box-shadow 0.15s ease, transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-/* Hover lifts the port: an accent glow ring + a deeper drop shadow reads as the
-   endpoint "floating" up off the card, ComfyUI-style. The ＋ glyph also scales
-   up slightly for the same affordance. */
-.ldd-canvas-handle:hover {
+/* Hover lifts the ring off the card: accent glow + springy outward reach
+ * (transform, not position, so the hit area never moves and the port can't
+ * jitter). The ＋ glyph also scales up for the same affordance. */
+.ldd-canvas-handle:hover .ldd-canvas-handle-ring {
   opacity: 1;
   border-color: var(--dsw-alias-accent, #6366f1);
   color: var(--dsw-alias-accent, #6366f1);
@@ -640,6 +671,13 @@
   box-shadow:
     0 0 0 4px rgba(99, 102, 241, 0.16),
     0 6px 16px rgba(0, 0, 0, 0.35);
+}
+
+.ldd-canvas-handle.react-flow__handle-left:hover .ldd-canvas-handle-ring {
+  transform: translateX(-12px);
+}
+.ldd-canvas-handle.react-flow__handle-right:hover .ldd-canvas-handle-ring {
+  transform: translateX(12px);
 }
 
 .ldd-canvas-handle-plus {
@@ -657,7 +695,8 @@
   transform: scale(1.28);
 }
 
-.ldd-canvas-node:hover .ldd-canvas-handle {
+/* Reveal the port when its node is hovered. */
+.ldd-canvas-node:hover .ldd-canvas-handle-ring {
   opacity: 1;
   border-color: var(--dsw-alias-label-primary);
   color: var(--dsw-alias-label-primary);
@@ -669,22 +708,9 @@
    border instead of being cut in half by it. */
 .ldd-canvas-handle.react-flow__handle-left {
   left: -26px;
-  transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease, background 0.12s ease, box-shadow 0.15s ease, left 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .ldd-canvas-handle.react-flow__handle-right {
   right: -26px;
-  transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease, background 0.12s ease, box-shadow 0.15s ease, right 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-/* On hover the port also SHIFTS outward off the card — it "reaches out" to
-   meet the incoming connection, which both widens the hit target (easier to
-   land a wire) and reads as the endpoint lifting off the card. The slight
-   springy overshoot (cubic-bezier) gives it the tapnow-style pop. */
-.ldd-canvas-handle.react-flow__handle-left:hover {
-  left: -38px;
-}
-.ldd-canvas-handle.react-flow__handle-right:hover {
-  right: -38px;
 }
 
 /* ---- node delete button removed: deletion lives in the right-click menu ---- */

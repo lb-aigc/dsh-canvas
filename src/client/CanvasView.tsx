@@ -594,14 +594,18 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
         so the card's rounded-corner `overflow: hidden` clip can't cut them off;
         they sit a gap away from the side, ComfyUI-style. */}
     <Handle type="target" position={Position.Left} className="ldd-canvas-handle">
-      <svg className="ldd-canvas-handle-plus" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <path d="M8 3.5v9M3.5 8h9" />
-      </svg>
+      <span className="ldd-canvas-handle-ring">
+        <svg className="ldd-canvas-handle-plus" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M8 3.5v9M3.5 8h9" />
+        </svg>
+      </span>
     </Handle>
     <Handle type="source" position={Position.Right} className="ldd-canvas-handle">
-      <svg className="ldd-canvas-handle-plus" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <path d="M8 3.5v9M3.5 8h9" />
-      </svg>
+      <span className="ldd-canvas-handle-ring">
+        <svg className="ldd-canvas-handle-plus" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M8 3.5v9M3.5 8h9" />
+        </svg>
+      </span>
     </Handle>
     </>
   )
@@ -1420,6 +1424,14 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
             // Wider connection hit radius: a link can start anywhere within this
             // many screen px of a handle, so the user need not land dead-center.
             connectionRadius={36}
+            // Edges are NOT reconnectable and NOT keyboard-focusable: hovering an
+            // edge otherwise shows React Flow's reconnect anchors (the scissors /
+            // "cut" affordance) and lets a double-click / drag disconnect the edge.
+            // Connections are meaningful reference chains here, so an accidental
+            // disconnect is worse than no quick-disconnect at all. Deliberate
+            // rewiring can be done by deleting the node (right-click) and relinking.
+            edgesReconnectable={false}
+            edgesFocusable={false}
             // Right-button drag pans the canvas; left-button drag on empty canvas
             // box-selects (normal pointer, not the grab hand), and left-dragging a
             // selected node moves the whole selection.
