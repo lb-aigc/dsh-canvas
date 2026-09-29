@@ -436,6 +436,12 @@ function createCanvasFace(ctx: ClientContext) {
       if (conversation?.resolveDraftAttachments === undefined) return []
       return conversation.resolveDraftAttachments(ids)
     }
+    // Symmetrical reference tracking: connecting a wire mirrors the source image
+    // into the composer as a draft attachment, whose draft id is a RANDOM UUID
+    // (not the content-addressed node.url — see createDrafts/browserDraftAttachment
+    // in dsh-client-ui-conversation). Remember url → draft ids so a disconnect can
+    // withdraw exactly the drafts THIS canvas added, never a user's own upload.
+    const referenceDrafts = new Map<string, Set<string>>()
     return {
       loadImage: async (ref: CanvasReadAssetRequest): Promise<string> => {
         // Read through the canvas's own read channel (not session.readAttachment):
@@ -494,12 +500,34 @@ function createCanvasFace(ctx: ClientContext) {
           if (drafts.length === 0) throw new Error('canvas: 附件草稿创建失败（createDrafts 返回空）')
           const added = input.addAttachments(drafts.map((d) => d.id))
           if (!added) throw new Error('canvas: 附件添加被拒绝（输入框非空闲状态）')
+          const tracked = referenceDrafts.get(node.url!) ?? new Set<string>()
+          for (const d of drafts) tracked.add(d.id)
+          referenceDrafts.set(node.url!, tracked)
           return
         }
         const text = node.kind === 'text' || node.kind === 'note'
           ? (node.content ?? node.label)
           : `[${KIND_LABEL[node.kind]}] ${node.label}`
         input.setDraft(text)
+      },
+      removeNodeReference: (node: CanvasNode): boolean => {
+        // Withdraw the composer reference(s) a connect added for this image node
+        // (symmetrical to addNodeToInput). Only image nodes produce a tracked
+        // reference; text/note/media drafts are not tracked here.
+        if (node.kind !== 'image' || node.url === undefined || node.url === '') return false
+        const ids = referenceDrafts.get(node.url)
+        if (ids === undefined || ids.size === 0) return false
+        let removed = false
+        for (const id of [...ids]) {
+          try {
+            if (composerInputOf().removeAttachment(id)) removed = true
+            ids.delete(id)
+          } catch {
+            // Non-fatal: the input may have already cleared this draft.
+          }
+        }
+        if (ids.size === 0) referenceDrafts.delete(node.url)
+        return removed
       },
       copyNodeToClipboard: async (node: CanvasNode): Promise<void> => {
         // Copy an image to the SYSTEM clipboard (paste into other apps), a

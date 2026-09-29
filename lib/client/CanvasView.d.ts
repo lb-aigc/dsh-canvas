@@ -71,6 +71,9 @@ export interface CanvasViewInjected extends CanvasWriteback {
     /** Put a node into the agent composer input box (image → thumbnail attachment,
      *  text/note → draft text), without sending. */
     addNodeToInput: (node: CanvasNode) => Promise<void>;
+    /** Withdraw the composer reference a connect added for this image node
+     *  (symmetrical to addNodeToInput). Returns true if a draft was removed. */
+    removeNodeReference: (node: CanvasNode) => boolean;
     /** Copy a node to the SYSTEM clipboard (image → bitmap, text/note → text). */
     copyNodeToClipboard: (node: CanvasNode) => Promise<void>;
     /** Save an image node's bytes to disk (native save dialog). */
@@ -117,6 +120,8 @@ export interface CanvasViewProps {
     ask: CanvasViewInjected['ask'];
     /** Injected composer-node injection (image → attachment, text/note → draft). */
     addNodeToInput: CanvasViewInjected['addNodeToInput'];
+    /** Injected composer-reference withdrawal (symmetrical to addNodeToInput). */
+    removeNodeReference: CanvasViewInjected['removeNodeReference'];
     /** Injected clipboard copy (image → bitmap, text/note → text). */
     copyNodeToClipboard: CanvasViewInjected['copyNodeToClipboard'];
     /** Injected image download (native save dialog). */
@@ -138,5 +143,5 @@ export interface CanvasViewProps {
     unlink: CanvasWriteback['unlink'];
     setPrimaryVariant: CanvasWriteback['setPrimaryVariant'];
 }
-export declare function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeToClipboard, downloadNodeImage, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link, unlink, setPrimaryVariant }: CanvasViewProps): import("react").JSX.Element;
+export declare function CanvasView({ useProjection, loadImage, addNodeToInput, removeNodeReference, copyNodeToClipboard, downloadNodeImage, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link, unlink, setPrimaryVariant }: CanvasViewProps): import("react").JSX.Element;
 //# sourceMappingURL=CanvasView.d.ts.map

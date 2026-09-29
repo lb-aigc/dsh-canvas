@@ -122,6 +122,9 @@ export interface CanvasViewInjected extends CanvasWriteback {
   /** Put a node into the agent composer input box (image → thumbnail attachment,
    *  text/note → draft text), without sending. */
   addNodeToInput: (node: CanvasNode) => Promise<void>
+  /** Withdraw the composer reference a connect added for this image node
+   *  (symmetrical to addNodeToInput). Returns true if a draft was removed. */
+  removeNodeReference: (node: CanvasNode) => boolean
   /** Copy a node to the SYSTEM clipboard (image → bitmap, text/note → text). */
   copyNodeToClipboard: (node: CanvasNode) => Promise<void>
   /** Save an image node's bytes to disk (native save dialog). */
@@ -170,6 +173,8 @@ export interface CanvasViewProps {
   ask: CanvasViewInjected['ask']
   /** Injected composer-node injection (image → attachment, text/note → draft). */
   addNodeToInput: CanvasViewInjected['addNodeToInput']
+  /** Injected composer-reference withdrawal (symmetrical to addNodeToInput). */
+  removeNodeReference: CanvasViewInjected['removeNodeReference']
   /** Injected clipboard copy (image → bitmap, text/note → text). */
   copyNodeToClipboard: CanvasViewInjected['copyNodeToClipboard']
   /** Injected image download (native save dialog). */
@@ -659,7 +664,7 @@ function toFlowEdges(state: CanvasState): Edge[] {
   }))
 }
 
-export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeToClipboard, downloadNodeImage, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link, unlink, setPrimaryVariant }: CanvasViewProps) {
+export function CanvasView({ useProjection, loadImage, addNodeToInput, removeNodeReference, copyNodeToClipboard, downloadNodeImage, models, compose, pickFiles, uploadFiles, addNode, removeNode, updateNode, moveNode, link, unlink, setPrimaryVariant }: CanvasViewProps) {
   const canvas = useProjection('canvas')
 
   // Local, RESPONSIVE flow state: the projection is the authoritative mirror,
@@ -977,7 +982,21 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
   const onEdgeDoubleClick = useCallback((_event: ReactMouseEvent, edge: Edge): void => {
     setFlowEdges((eds) => eds.filter((e) => e.id !== edge.id))
     run('unlink', unlink(edge.id))
-  }, [unlink, run])
+    // Symmetrical withdrawal: connecting this wire mirrored the source image into
+    // the composer as a reference. Disconnecting it must remove that reference —
+    // but only when this was the source's LAST outgoing wire (a fan-out still
+    // referenced by other wires keeps its reference).
+    const state = canvasRef.current
+    if (state !== undefined) {
+      const stillWired = state.edges.some((e) => e.id !== edge.id && e.source === edge.source)
+      if (!stillWired) {
+        const sourceNode = state.nodes.find((n) => n.id === edge.source)
+        if (sourceNode !== undefined && sourceNode.kind === 'image') {
+          try { removeNodeReference(sourceNode) } catch { /* non-fatal */ }
+        }
+      }
+    }
+  }, [unlink, run, removeNodeReference])
 
   if (canvas === undefined) {
     return <div className="ldd-canvas-empty">画布不可用（canvas 插件未挂载）。</div>
