@@ -718,6 +718,11 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
   // node is written, the edge not yet confirmed by the Host). The reconcile
   // below keeps their optimistic edge until the authoritative state connects them.
   const pendingLinkTargets = useRef<Set<string>>(new Set())
+  // Source→target pairs whose link write-back is currently in flight. Guards
+  // against a re-connect (or the optimistic edge + authoritative edge racing)
+  // double-mirroring the source image into the composer. Keyed synchronously via
+  // a ref — a setState updater runs deferred, so it can't gate this reliably.
+  const linkingPairs = useRef<Set<string>>(new Set())
   // Live selected-node ids, fed by React Flow's onSelectionChange. The context
   // menu reads this (not rfRef.getNodes()) — getNodes() returns the store
   // snapshot whose `selected` flag can lag one frame behind a box-select, which
@@ -986,24 +991,28 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     const source = connection.source
     const target = connection.target
     if (source === null || target === null) return
+    const pairKey = `${source}->${target}`
+    // Guard synchronously (a setState updater runs deferred, so it can't gate
+    // this): a re-connect of an already-linked pair must not double-mirror the
+    // source image into the composer.
+    if (linkingPairs.current.has(pairKey)) return
+    linkingPairs.current.add(pairKey)
     // Optimistic edge: paint the wire IMMEDIATELY, then persist. Without this the
     // edge only appears after the Host writes back and the projection refreshes —
     // the multi-second lag the user noticed. The pending-target set keeps this
     // local edge alive until the authoritative state confirms it (reconcile below).
     const optimisticId = `opt-${source}-${target}`
-    let alreadyLinked = false
     setFlowEdges((eds) => {
-      if (eds.some((e) => e.source === source && e.target === target)) {
-        alreadyLinked = true
-        return eds
-      }
+      if (eds.some((e) => e.source === source && e.target === target)) return eds
       return [...eds, { id: optimisticId, source, target, type: 'default' }]
     })
-    if (!alreadyLinked) pendingLinkTargets.current.add(target)
+    pendingLinkTargets.current.add(target)
     void link({ source, target }).then(() => {
+      linkingPairs.current.delete(pairKey)
       pendingLinkTargets.current.delete(target)
       setWritebackError(null)
     }).catch((error: unknown) => {
+      linkingPairs.current.delete(pairKey)
       pendingLinkTargets.current.delete(target)
       setFlowEdges((eds) => eds.filter((e) => e.id !== optimisticId))
       const msg = error instanceof Error ? error.message : String(error)
@@ -1014,7 +1023,6 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, copyNodeT
     // "use this as a reference" gesture. Mirror it into the composer input as a
     // reference attachment, so the user does not have to right-click each source
     // and pick 添加至输入框 one by one — the chain already says what to do.
-    if (alreadyLinked) return
     const sourceNode = canvas?.nodes.find((n: CanvasNode) => n.id === source)
     if (sourceNode !== undefined && sourceNode.kind === 'image') {
       void addNodeToInput(sourceNode)
