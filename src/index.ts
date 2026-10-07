@@ -510,6 +510,11 @@ export function apply(ctx: Context): void {
       // errored). Those placeholders would otherwise spin "生成中…" forever and
       // persist across turns as ghost cards. Remove them (and their touching
       // edges) so the canvas doesn't show a permanent stuck card.
+      //
+      // SKIP placeholders carrying a `taskId`: under async generation the
+      // generate plugin adopts the placeholder (stamps a taskId) and its
+      // background scheduler fills it AFTER this turn has already ended. A
+      // taskId-bearing placeholder is the scheduler's to finish, not an orphan.
       const state = turnStates.get(session)
       if (state !== undefined && state.pendingNodeIds.length > 0) {
         const orphanIds = [...state.pendingNodeIds]
@@ -518,7 +523,7 @@ export function apply(ctx: Context): void {
             let next = foldCanvas(session.snapshotEvents())
             let changed = false
             for (const id of orphanIds) {
-              if (next.nodes.some((n) => n.id === id && n.meta?.pending === true)) {
+              if (next.nodes.some((n) => n.id === id && n.meta?.pending === true && n.meta.taskId === undefined)) {
                 next = removeNode(next, id)
                 changed = true
               }
@@ -642,37 +647,12 @@ export function apply(ctx: Context): void {
       })
       return
     }
-    // Phase 1.5 — a text-only generation submit has NO reference image, so
-    // Phase 1 (which keys off reference blocks) never hangs a placeholder. When
-    // the agent actually decides to generate (its `generate_image` tool/call),
-    // hang a single "生成中…" placeholder so the canvas shows the task is
-    // running even for pure text-to-image.
-    if (event.type === 'tool/call') {
-      const name = (event.data as { readonly name?: unknown }).name
-      if (name !== 'generate_image') return
-      const state = turnStates.get(session)
-      if (state === undefined || state.placeholderRequested) return
-      state.placeholderRequested = true
-      queueMicrotask(() => {
-        try {
-          let next = foldCanvas(session.snapshotEvents())
-          const auto = next.nodes.length
-          const placeholder = addNode(next, {
-            kind: 'image',
-            label: '生成中…',
-            x: (auto % 4) * 220,
-            y: Math.floor(auto / 4) * 180,
-            meta: { pending: true, autoPlace: true },
-          })
-          next = placeholder.state
-          state.pendingNodeIds.push(placeholder.node.id)
-          session.append('canvas/state', { state: next })
-        } catch (error) {
-          console.error('[ldd-canvas] auto-mirror (tool/call) failed:', error)
-        }
-      })
-      return
-    }
+    // Phase 1.5 (REMOVED): the old synchronous `generate_image` returned image
+    // blocks in its tool result, so the canvas hung a "生成中…" placeholder here
+    // (on `tool/call`) and filled it on `tool/result`. Since async generation
+    // (generate plugin now submits → returns taskId → a background scheduler
+    // fills the canvas directly via `canvas/state`), the placeholder is owned by
+    // the generate plugin — hanging a second one here would DOUBLE the card.
     if (event.type !== 'assistant/message' && event.type !== 'tool/result') return
     const metas = generatedImagesOf(event)
     if (metas.length === 0) return
