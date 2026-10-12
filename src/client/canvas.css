@@ -1154,3 +1154,101 @@
   object-fit: cover;
   flex: 0 0 auto;
 }
+
+/* ---- group container (video frame groups + any future grouping) ---- */
+/* React Flow's built-in `.react-flow__node-group` chrome is dropped; the frame
+   is drawn entirely by `.ldd-canvas-group` so collapse/expand + the title bar
+   are self-contained. Children (parentId → this id) are absolutely positioned
+   by React Flow inside the frame; the frame's pixel size comes from the node's
+   inline `style` (see `groupDimensions` in CanvasView). */
+.react-flow__node-group {
+  border: none;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+}
+
+.ldd-canvas-group {
+  position: absolute;
+  inset: 0;
+  border: 1.5px dashed var(--dsw-alias-border-l2, rgba(120, 130, 150, 0.55));
+  border-radius: 12px;
+  background: rgba(120, 130, 150, 0.08);
+  transition: border-color 0.15s ease;
+}
+
+.ldd-canvas-group:hover {
+  border-color: var(--dsw-alias-accent, rgba(99, 102, 241, 0.8));
+}
+
+.ldd-canvas-group-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 12px 12px 0 0;
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.04));
+  cursor: grab;
+  user-select: none;
+}
+.ldd-canvas-group-head:active {
+  cursor: grabbing;
+}
+
+.ldd-canvas-group--collapsed .ldd-canvas-group-head {
+  border-radius: 12px;
+  height: 100%;
+}
+
+.ldd-canvas-group-glyph {
+  display: inline-flex;
+  color: var(--dsw-alias-label-secondary, #94a3b8);
+}
+.ldd-canvas-group-glyph svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ldd-canvas-group-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, #e2e8f0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ldd-canvas-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #94a3b8);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.ldd-canvas-group-toggle:hover {
+  background: var(--dsw-alias-bg-layer-3, rgba(255, 255, 255, 0.08));
+  color: var(--dsw-alias-label-primary, #e2e8f0);
+}
+.ldd-canvas-group-toggle svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

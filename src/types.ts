@@ -28,6 +28,10 @@ export interface CanvasAddNodeRequest {
   variants?: CanvasImageVariant[]
   primaryIndex?: number
   meta?: Record<string, JsonValue>
+  /** Parent group node id (child x/y become relative to the group). */
+  parentId?: string
+  /** Group collapse state (group nodes only). */
+  collapsed?: boolean
 }
 
 /** New-edge input for {@link CanvasService.link}. */
@@ -53,6 +57,10 @@ export interface CanvasUpdateNodeRequest {
   variants?: CanvasImageVariant[]
   primaryIndex?: number
   meta?: Record<string, JsonValue>
+  /** Re-parent the node into a group (its x/y become relative to the group). */
+  parentId?: string
+  /** Set the group's collapse state. */
+  collapsed?: boolean
 }
 
 /** Input to {@link CanvasService.setPrimaryVariant}: promote one variant of a

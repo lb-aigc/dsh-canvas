@@ -10,7 +10,7 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | {
 };
 /** What a canvas node holds. Assets (image/video/music) reference an attachment
  *  or URL; text/note nodes carry inline content. */
-export type CanvasNodeKind = 'image' | 'video' | 'music' | 'text' | 'note';
+export type CanvasNodeKind = 'image' | 'video' | 'music' | 'text' | 'note' | 'group';
 /** One image variant inside a multi-variant image node (a single
  *  `generate_image` call that produced N images — count=4 → 4 variants). Each
  *  variant is a complete, independently-loadable image reference, identical in
@@ -54,6 +54,12 @@ export interface CanvasNode {
     meta?: Record<string, JsonValue>;
     /** Inline content for text/note nodes. */
     content?: string;
+    /** Parent group node id (sub-flow membership). A child node's x/y is
+     *  RELATIVE to its group's top-left once `parentId` is set. */
+    parentId?: string;
+    /** Group collapse state (group nodes only). Collapsed groups hide their
+     *  children in the renderer; the children stay in the state, hidden. */
+    collapsed?: boolean;
 }
 /** One directed relation between two nodes. */
 export interface CanvasEdge {
@@ -84,7 +90,10 @@ export declare function addNode(state: CanvasState, node: Omit<CanvasNode, 'id'>
 };
 /**
  * Remove a node and every edge touching it. Idempotent: a missing id is a
- * no-op returning the same state.
+ * no-op returning the same state. Removing a GROUP node cascades: every node
+ * whose `parentId` (directly or transitively) points into it is removed too,
+ * so a group delete takes its whole subtree — no orphaned children left with a
+ * dangling parent reference.
  */
 export declare function removeNode(state: CanvasState, nodeId: string): CanvasState;
 /** Add a directed edge. Both endpoints must exist, else it throws. */
@@ -98,7 +107,7 @@ export declare function addEdge(state: CanvasState, edge: Omit<CanvasEdge, 'id'>
  *  returning the same state. */
 export declare function removeEdge(state: CanvasState, edgeId: string): CanvasState;
 /** Patch one node's mutable fields. Missing id is a no-op. */
-export declare function updateNode(state: CanvasState, nodeId: string, patch: Partial<Pick<CanvasNode, 'label' | 'x' | 'y' | 'content' | 'meta' | 'url' | 'variants' | 'primaryIndex'>>): CanvasState;
+export declare function updateNode(state: CanvasState, nodeId: string, patch: Partial<Pick<CanvasNode, 'label' | 'x' | 'y' | 'content' | 'meta' | 'url' | 'variants' | 'primaryIndex' | 'parentId' | 'collapsed'>>): CanvasState;
 /** Promote one variant of a multi-variant node to primary. Updates the node's
  *  `url` (to the variant's attachment id), `primaryIndex`, and the image
  *  geometry meta (width/height/mediaType/bytes) so the read-back / reference /

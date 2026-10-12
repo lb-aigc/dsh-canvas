@@ -241,6 +241,7 @@ const KIND_LABEL: Record<CanvasNode['kind'], string> = {
   music: '音乐',
   text: '文本',
   note: '笔记',
+  group: '分组',
 }
 
 /** A node's `url` is a `sha256:` attachment id. */

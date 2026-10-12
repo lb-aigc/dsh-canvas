@@ -18,7 +18,10 @@ import { basename, dirname, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const id = '@ldd/dsh-canvas'
-const PACKAGE_DIR = fileURLToPath(new URL('.', import.meta.url))
+// This file lives in `build/` (a subdirectory), so the package root is its
+// parent directory. `entry` and the `lib/` typert-remote resolve are both
+// relative to the package root.
+const PACKAGE_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), '..')
 
 /** Module-table rows the shell shares (external): platform modules + this
  *  package's peerDependencies. Everything else inlines (deps + wire layers). */
@@ -66,7 +69,7 @@ function styleInjectionModule(id: string, fileId: string, css: string): string {
 
 export default {
   name: `${id}/client`,
-  entry: { client: 'src/client/index.ts' },
+  entry: { client: resolvePath(PACKAGE_DIR, 'src/client/index.ts') },
   outDir: 'lib',
   format: 'cjs',
   platform: 'browser',

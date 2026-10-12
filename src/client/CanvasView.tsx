@@ -35,7 +35,7 @@ import {
   applyEdgeChanges,
   applyNodeChanges,
 } from '@xyflow/react'
-import type { Edge, FinalConnectionState, Node, NodeTypes, OnConnect, OnConnectStartParams, ReactFlowInstance } from '@xyflow/react'
+import type { Edge, FinalConnectionState, Node, NodeProps, NodeTypes, OnConnect, OnConnectStartParams, ReactFlowInstance } from '@xyflow/react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { newId } from '../model.ts'
 import type { CanvasEdge, CanvasImageVariant, CanvasNode, CanvasState, JsonValue } from '../model.ts'
@@ -202,10 +202,11 @@ const LoadImageContext = createContext<(ref: CanvasReadAssetRequest) => Promise<
 )
 
 /** Write-back actions reachable from deep inside a node card (the delete button). */
-const CanvasActionsContext = createContext<{ removeNode: (nodeId: string) => void; downloadNodeImage: (node: CanvasNode) => void; setPrimaryVariant: (nodeId: string, variantIndex: number) => void }>({
+const CanvasActionsContext = createContext<{ removeNode: (nodeId: string) => void; downloadNodeImage: (node: CanvasNode) => void; setPrimaryVariant: (nodeId: string, variantIndex: number) => void; toggleGroup: (groupId: string, collapsed: boolean) => void }>({
   removeNode: () => {},
   downloadNodeImage: () => {},
   setPrimaryVariant: () => {},
+  toggleGroup: () => {},
 })
 
 /** A node's `url` is either a `sha256:` attachment id or a plain http(s) url. */
@@ -226,6 +227,7 @@ interface CanvasNodeData {
   variants?: CanvasImageVariant[]
   primaryIndex?: number
   meta?: Record<string, JsonValue>
+  collapsed?: boolean
 }
 
 /** Human-readable kind caption for the card head. */
@@ -235,6 +237,7 @@ const KIND_LABEL: Record<CanvasNode['kind'], string> = {
   music: '音乐',
   text: '文本',
   note: '笔记',
+  group: '分组',
 }
 
 /** One inline kind glyph (16×16, stroke currentColor, consistent with the header button). */
@@ -283,6 +286,13 @@ function kindIcon(kind: CanvasNode['kind']): ReactNode {
           <path d="M3 2.5h8l2 2V13.5H3z" />
           <path d="M11 2.5V4.5h2" />
           <path d="M5.5 7h5M5.5 9.5h5M5.5 12h3" />
+        </svg>
+      )
+    case 'group':
+      return (
+        <svg {...common}>
+          <rect x="1.5" y="1.5" width="13" height="13" rx="2" />
+          <path d="M1.5 5.5h13" />
         </svg>
       )
   }
@@ -619,6 +629,39 @@ function CanvasNodeCard({ id, data }: { id: string; data: CanvasNodeData }) {
   )
 }
 
+/** A group container: a titled frame whose children (parentId → this id) move
+ *  as one unit. The head carries a collapse/expand toggle; when collapsed the
+ *  renderer hides the children (`hidden: true`) and the frame shrinks to its
+ *  title bar. Groups carry no handles — they are organization, not data flow. */
+function GroupNode({ id, data }: NodeProps<Node<{ label: string; collapsed?: boolean }, 'group'>>) {
+  const { toggleGroup } = useContext(CanvasActionsContext)
+  const collapsed = data.collapsed === true
+  return (
+    <div className={collapsed ? 'ldd-canvas-group ldd-canvas-group--collapsed' : 'ldd-canvas-group'}>
+      <div className="ldd-canvas-group-head nodrag">
+        <span className="ldd-canvas-group-glyph" aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
+            <rect x="1.5" y="1.5" width="13" height="13" rx="2" />
+            <path d="M1.5 5.5h13" />
+          </svg>
+        </span>
+        <span className="ldd-canvas-group-title">{data.label}</span>
+        <button
+          type="button"
+          className="ldd-canvas-group-toggle nodrag"
+          title={collapsed ? '展开' : '折叠'}
+          aria-label={collapsed ? '展开分组' : '折叠分组'}
+          onClick={(event) => { event.stopPropagation(); toggleGroup(id, !collapsed) }}
+        >
+          <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+            {collapsed ? <path d="M6 3l5 5-5 5" /> : <path d="M3 6l5 5 5-5" />}
+          </svg>
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /** The drop target shown while a dragged connection awaits its new node:
  *  a dashed "＋" marker at the release point. The ghost node + dashed edge are
  *  local-only (never written back) — picking a menu item replaces them with the
@@ -641,16 +684,63 @@ const nodeTypes: NodeTypes = {
   music: CanvasNodeCard,
   text: CanvasNodeCard,
   note: CanvasNodeCard,
+  group: GroupNode,
   draft: DraftTargetNode,
 }
 
+/** Grid layout constants shared by the host's `mirrorVideoFrames` (child
+ *  placement) and the client's group sizing below. Keep in sync. */
+const GROUP_COLS = 4
+const GROUP_CELL = 260
+const GROUP_HEADER = 48
+
+/** Estimate a group node's pixel box from its child count (the host lays
+ *  children on a fixed grid; we mirror that here so the group frame wraps
+ *  them without relying on React Flow auto-measure, which does not size a
+ *  group to its absolutely-positioned children). */
+function groupDimensions(childCount: number): { width: number; height: number } {
+  if (childCount <= 0) return { width: 240, height: GROUP_HEADER + 16 }
+  const cols = Math.min(GROUP_COLS, childCount)
+  const rows = Math.ceil(childCount / GROUP_COLS)
+  return {
+    width: cols * GROUP_CELL + 24,
+    height: rows * GROUP_CELL + GROUP_HEADER + 24,
+  }
+}
+
 function toFlowNodes(state: CanvasState): Node[] {
-  return state.nodes.map((n) => ({
-    id: n.id,
-    type: n.kind,
-    position: { x: n.x, y: n.y },
-    data: { label: n.label, kind: n.kind, content: n.content, url: n.url, variants: n.variants, primaryIndex: n.primaryIndex, meta: n.meta },
-  }))
+  const collapsedGroups = new Set(
+    state.nodes.filter((n) => n.kind === 'group' && n.collapsed === true).map((n) => n.id),
+  )
+  const childCounts = new Map<string, number>()
+  for (const n of state.nodes) {
+    if (n.parentId === undefined) continue
+    childCounts.set(n.parentId, (childCounts.get(n.parentId) ?? 0) + 1)
+  }
+  return state.nodes.map((n) => {
+    if (n.kind === 'group') {
+      const collapsed = n.collapsed === true
+      const dims = groupDimensions(childCounts.get(n.id) ?? 0)
+      return {
+        id: n.id,
+        type: 'group',
+        position: { x: n.x, y: n.y },
+        style: collapsed
+          ? { width: 240, height: GROUP_HEADER }
+          : { width: dims.width, height: dims.height },
+        data: { label: n.label, kind: n.kind, meta: n.meta, collapsed },
+      }
+    }
+    const inCollapsedGroup = n.parentId !== undefined && collapsedGroups.has(n.parentId)
+    return {
+      id: n.id,
+      type: n.kind,
+      position: { x: n.x, y: n.y },
+      ...(n.parentId === undefined ? {} : { parentId: n.parentId }),
+      ...(inCollapsedGroup ? { hidden: true } : {}),
+      data: { label: n.label, kind: n.kind, content: n.content, url: n.url, variants: n.variants, primaryIndex: n.primaryIndex, meta: n.meta },
+    }
+  })
 }
 
 function toFlowEdges(state: CanvasState): Edge[] {
@@ -808,10 +898,20 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, removeNod
       delete rest['autoPlace']
       return rest
     }
-    const sources = autoNodes.filter((n: CanvasNode) => n.meta?.pending !== true)
-    const pendings = autoNodes.filter((n: CanvasNode) => n.meta?.pending === true)
     const rect = rootEl.getBoundingClientRect()
     const center = rf.screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
+    // 1) autoPlace GROUP nodes (a video frame group): move the whole frame into
+    //    the viewport center — children keep their relative coords, so they
+    //    follow automatically.
+    const autoGroups = autoNodes.filter((n: CanvasNode) => n.kind === 'group')
+    for (const g of autoGroups) {
+      void updateNode(g.id, { x: center.x - 200, y: center.y - 60, meta: strip(g.meta ?? {}) }).catch(() => {})
+    }
+    // 2) image autoPlace nodes (reference images / placeholders), excluding the
+    //    groups handled above.
+    const imageNodes = autoNodes.filter((n: CanvasNode) => n.kind !== 'group')
+    const sources = imageNodes.filter((n: CanvasNode) => n.meta?.pending !== true)
+    const pendings = imageNodes.filter((n: CanvasNode) => n.meta?.pending === true)
     const colX = center.x - 220
     // Stack vertically with a PER-NODE height (not a fixed gap): image cards
     // size to their aspect ratio (short edge 200px, long edge ≤360px) plus the
@@ -1405,7 +1505,10 @@ export function CanvasView({ useProjection, loadImage, addNodeToInput, removeNod
     setPrimaryVariant: (nodeId: string, variantIndex: number) => {
       run('setPrimaryVariant', setPrimaryVariant(nodeId, variantIndex))
     },
-  }), [removeNode, run, downloadNodeImage, setPrimaryVariant, captureUndo])
+    toggleGroup: (groupId: string, collapsed: boolean) => {
+      run('toggleGroup', updateNode(groupId, { collapsed }))
+    },
+  }), [removeNode, run, downloadNodeImage, setPrimaryVariant, captureUndo, updateNode])
 
   // Right-click a node → context menu (删除 / 复制 / 添加至输入框). The browser's
   // native context menu is suppressed so our menu owns the right-click. When the

@@ -92,6 +92,8 @@ export class CanvasService extends TypertRemoteService {
       ...(request.variants === undefined ? {} : { variants: request.variants }),
       ...(request.primaryIndex === undefined ? {} : { primaryIndex: request.primaryIndex }),
       ...(request.meta === undefined ? {} : { meta: request.meta }),
+      ...(request.parentId === undefined ? {} : { parentId: request.parentId }),
+      ...(request.collapsed === undefined ? {} : { collapsed: request.collapsed }),
     })
     session.append('canvas/state', { state: next })
     return next
@@ -122,6 +124,8 @@ export class CanvasService extends TypertRemoteService {
       ...(patch.variants === undefined ? {} : { variants: patch.variants }),
       ...(patch.primaryIndex === undefined ? {} : { primaryIndex: patch.primaryIndex }),
       ...(patch.meta === undefined ? {} : { meta: patch.meta }),
+      ...(patch.parentId === undefined ? {} : { parentId: patch.parentId }),
+      ...(patch.collapsed === undefined ? {} : { collapsed: patch.collapsed }),
     })
     session.append('canvas/state', { state: next })
     return next
