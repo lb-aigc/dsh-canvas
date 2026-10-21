@@ -865,10 +865,12 @@ export function apply(ctx: ClientContext): void {
  */
 function openCanvasRoot(ctx: ClientContext): void {
   const sessions = ctx.get('sessions') as {
-    list: { getSnapshot(): { current: SessionId | undefined } }
+    current?: { value?: { key?: SessionId } }
+    list: { getSnapshot(): { ids?: SessionId[]; byId?: Record<string, unknown> } }
   } | undefined
   const uiWorkspace = ctx.get('uiWorkspace') as {
     startSession(workspaceId?: unknown): void
+    openSession(target: unknown): void
   } | undefined
   const sidebarRight = ctx.get('sidebarRight') as {
     openTab(kind: string): void
@@ -876,8 +878,21 @@ function openCanvasRoot(ctx: ClientContext): void {
 
   if (sidebarRight === undefined) return
 
-  if (sessions?.list.getSnapshot().current === undefined && uiWorkspace !== undefined) {
-    uiWorkspace.startSession()
+  // 画布是 session-scoped：先确保有一个会话。无当前会话时，复用最近的已有
+  // 会话（而不是新建空白会话），避免点画布按钮误开新会话；只有真正无任何
+  // 会话时才新建。
+  // 注：SessionListState（list.getSnapshot()）只有 ids/byId，没有 current 字段；
+  // 「当前会话」由 sessions 服务的 current BindingSource 表达（value.key）。
+  const currentId = sessions?.current?.value?.key
+  if (currentId === undefined && uiWorkspace !== undefined) {
+    const snapshot = sessions?.list.getSnapshot()
+    const ids = snapshot?.ids ?? Object.keys(snapshot?.byId ?? {})
+    const recent = ids[ids.length - 1]
+    if (recent !== undefined) {
+      uiWorkspace.openSession(recent)
+    } else {
+      uiWorkspace.startSession()
+    }
   }
 
   const tryOpen = (attempt: number): void => {
