@@ -690,7 +690,17 @@ export function apply(ctx: Context): void {
           let mirrored = 0
           for (const block of blocks) {
             state.refIds.add(block.attachmentId)
-            if (next.nodes.some((node) => node.url === block.attachmentId)) continue
+            // Dedupe against BOTH the node's url AND its variants. The scheduler
+            // fills a pending placeholder with `url` = primary attachmentId and
+            // the rest as `variants`; a batch of N images therefore lands as ONE
+            // node whose later images sit in `variants`, not in any node's `url`.
+            // Without the variants check, the second image of a batch (in the
+            // user/message the scheduler appends for the chat thumbnails) is
+            // mirrored as a NEW detached card instead of being skipped.
+            if (next.nodes.some((node) =>
+              node.url === block.attachmentId
+              || (node.variants?.some((v) => v.attachmentId === block.attachmentId) ?? false),
+            )) continue
             const result = addNode(next, {
               kind: 'image',
               label: block.name ?? '图片',
